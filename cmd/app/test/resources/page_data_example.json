@@ -1,0 +1,60 @@
+{
+    "url": "https://example.com",
+    "canonical_url": "https://example.com",
+    "title": "Example Title",
+    "charset": "UTF-8",
+    "meta_description": "This is an example description for the page.",
+    "meta_keywords": "example, sample, json",
+    "robots_meta": "index,follow",
+    "language": "en",
+    "headings": {
+      "h1": ["Main Title"],
+      "h2": ["Subtitle 1", "Subtitle 2"]
+    },
+    "alt_texts": [
+      "An image of a cat",
+      "A screenshot of the homepage"
+    ],
+    "anchor_texts": [
+      "Click here",
+      "Learn more"
+    ],
+    "internal_links": [
+      "/about",
+      "/contact"
+    ],
+    "external_links": [
+      "https://google.com",
+      "https://github.com"
+    ],
+    "structured_data": [
+      "{\"@context\": \"http://schema.org\", \"@type\": \"WebPage\"}"
+    ],
+    "open_graph": {
+      "og:title": "Example Title",
+      "og:description": "This is an example of an OpenGraph description.",
+      "og:image": "https://example.com/image.jpg"
+    },
+    "author": "John Doe",
+    "date_published": "2025-02-13T10:00:00Z",
+    "date_modified": "2025-02-14T08:00:00Z",
+    "categories": [
+      "Tech",
+      "Go Programming"
+    ],
+    "tags": [
+      "go",
+      "json",
+      "example"
+    ],
+    "social_links": [
+      "https://twitter.com/example",
+      "https://facebook.com/example"
+    ],
+    "visible_text": "This is the main content of the page...",
+    "load_time": 15000000000,
+    "is_secure": true,
+    "last_crawled": "2025-02-14T09:30:00Z",
+    "fetch_error": ""
+}
+  
