@@ -1,14 +1,15 @@
-package queue 
+package queue
 
 import (
-    "errors"
-    "sync"
+	"errors"
+	"indexer/internal/pkg/models"
+	"sync"
 )
 
 type Queue struct {
     mu       sync.Mutex
     capacity int
-    q        [][]byte
+    q        []models.PageData
 }
 
 // First in, first out queue 
@@ -24,12 +25,12 @@ func CreateQueue(capacity int) (*Queue, error) {
     }
     return &Queue{
         capacity: capacity,
-        q:        make([][]byte, 0, capacity),
+        q:        make([]models.PageData, 0, capacity),
     }, nil
 }
 
 // Inserts an item into the queue
-func (q *Queue) Insert(item []byte) error {
+func (q *Queue) Insert(item models.PageData) error {
     q.mu.Lock()
     defer q.mu.Unlock()
     if len(q.q) < int(q.capacity) {
@@ -40,15 +41,15 @@ func (q *Queue) Insert(item []byte) error {
 }
 
 // Removes the oldest element from the queue
-func (q *Queue) Remove() []byte {
+func (q *Queue) Remove() (models.PageData, error) {
     q.mu.Lock()
     defer q.mu.Unlock()
     if len(q.q) > 0 {
         item := q.q[0]
         q.q = q.q[1:]
-        return item
+        return item, nil
     }
-    return nil
+    return models.PageData{}, errors.New("Queue is empty")
 }
 
 // Returns the number of elements in the queue

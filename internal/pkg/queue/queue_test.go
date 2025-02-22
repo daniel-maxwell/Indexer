@@ -1,8 +1,9 @@
 package queue
 
 import (
-	"bytes"
+	"reflect"
 	"testing"
+	"indexer/internal/pkg/models"
 )
 
 // Tests creating a queue with a given capacity.
@@ -50,7 +51,7 @@ func TestInsert(t *testing.T) {
 		t.Errorf("Expected queue length to be 0, got %d", q.Length())
 	}
 
-	err = q.Insert([]byte("a"))
+	err = q.Insert(models.PageData{URL: "a"})
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
 	}
@@ -58,7 +59,7 @@ func TestInsert(t *testing.T) {
 		t.Errorf("Expected queue length to be 1, got %d", q.Length())
 	}
 
-	err = q.Insert([]byte("b"))
+	err = q.Insert(models.PageData{URL: "b"})
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
 	}
@@ -66,7 +67,7 @@ func TestInsert(t *testing.T) {
 		t.Errorf("Expected queue length to be 2, got %d", q.Length())
 	}
 
-	err = q.Insert([]byte("c"))
+	err = q.Insert(models.PageData{URL: "c"})
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
 	}
@@ -74,7 +75,7 @@ func TestInsert(t *testing.T) {
 		t.Errorf("Expected queue length to be 3, got %d", q.Length())
 	}
 
-	err = q.Insert([]byte("d"))
+	err = q.Insert(models.PageData{URL: "d"})
 	if err == nil {
 		t.Errorf("Expected error, got nil")
 	}
@@ -90,38 +91,56 @@ func TestRemove(t *testing.T) {
 		t.Errorf("Expected no error, got %v", err)
 	}
 
-	// Insert byte slices
-	q.Insert([]byte("a"))
-	q.Insert([]byte("b"))
-	q.Insert([]byte("c"))
+	// Insert PageData values
+	if err := q.Insert(models.PageData{URL: "a"}); err != nil {
+		t.Errorf("Insert error: %v", err)
+	}
+	if err := q.Insert(models.PageData{URL: "b"}); err != nil {
+		t.Errorf("Insert error: %v", err)
+	}
+	if err := q.Insert(models.PageData{URL: "c"}); err != nil {
+		t.Errorf("Insert error: %v", err)
+	}
 
-	elem := q.Remove()
-	if !bytes.Equal(elem, []byte("a")) {
-		t.Errorf("Expected removed element to be 'a', got '%s'", elem)
+	elem, err := q.Remove()
+	if err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
+	if elem.URL != "a" {
+		t.Errorf("Expected removed element URL to be 'a', got '%s'", elem.URL)
 	}
 	if q.Length() != 2 {
 		t.Errorf("Expected queue length to be 2, got %d", q.Length())
 	}
 
-	elem = q.Remove()
-	if !bytes.Equal(elem, []byte("b")) {
-		t.Errorf("Expected removed element to be 'b', got '%s'", elem)
+	elem, err = q.Remove()
+	if err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
+	if elem.URL != "b" {
+		t.Errorf("Expected removed element URL to be 'b', got '%s'", elem.URL)
 	}
 	if q.Length() != 1 {
 		t.Errorf("Expected queue length to be 1, got %d", q.Length())
 	}
 
-	elem = q.Remove()
-	if !bytes.Equal(elem, []byte("c")) {
-		t.Errorf("Expected removed element to be 'c', got '%s'", elem)
+	elem, err = q.Remove()
+	if err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
+	if elem.URL != "c" {
+		t.Errorf("Expected removed element URL to be 'c', got '%s'", elem.URL)
 	}
 	if q.Length() != 0 {
 		t.Errorf("Expected queue length to be 0, got %d", q.Length())
 	}
 
-	elem = q.Remove()
-	if len(elem) != 0 {
-		t.Errorf("Queue should be empty and return an empty slice, got '%s'", elem)
+	elem, err = q.Remove()
+	if err == nil {
+		t.Errorf("Expected error when removing from empty queue, got nil")
+	}
+	if !reflect.DeepEqual(elem, models.PageData{}) {
+		t.Errorf("Expected removed element to be zero value, got %v", elem)
 	}
 	if q.Length() != 0 {
 		t.Errorf("Expected queue length to be 0, got %d", q.Length())
@@ -138,7 +157,7 @@ func TestLength(t *testing.T) {
 		t.Errorf("Expected queue length to be 0, got %d", q.Length())
 	}
 
-	err = q.Insert([]byte("a"))
+	err = q.Insert(models.PageData{URL: "a"})
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
 	}
@@ -146,7 +165,7 @@ func TestLength(t *testing.T) {
 		t.Errorf("Expected queue length to be 1, got %d", q.Length())
 	}
 
-	err = q.Insert([]byte("b"))
+	err = q.Insert(models.PageData{URL: "b"})
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
 	}
@@ -154,7 +173,7 @@ func TestLength(t *testing.T) {
 		t.Errorf("Expected queue length to be 2, got %d", q.Length())
 	}
 
-	err = q.Insert([]byte("c"))
+	err = q.Insert(models.PageData{URL: "c"})
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
 	}
@@ -162,7 +181,7 @@ func TestLength(t *testing.T) {
 		t.Errorf("Expected queue length to be 3, got %d", q.Length())
 	}
 
-	err = q.Insert([]byte("d"))
+	err = q.Insert(models.PageData{URL: "d"})
 	if err == nil {
 		t.Errorf("Expected error, got nil")
 	}
@@ -170,33 +189,45 @@ func TestLength(t *testing.T) {
 		t.Errorf("Queue should be full, expected queue length to be 3, got %d", q.Length())
 	}
 
-	value := q.Remove()
-	if !bytes.Equal(value, []byte("a")) {
-		t.Errorf("Expected removed element to be 'a', got '%s'", value)
+	value, err := q.Remove()
+	if err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
+	if value.URL != "a" {
+		t.Errorf("Expected removed element URL to be 'a', got '%s'", value.URL)
 	}
 	if q.Length() != 2 {
 		t.Errorf("Expected queue length to be 2, got %d", q.Length())
 	}
 
-	value = q.Remove()
-	if !bytes.Equal(value, []byte("b")) {
-		t.Errorf("Expected removed element to be 'b', got '%s'", value)
+	value, err = q.Remove()
+	if err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
+	if value.URL != "b" {
+		t.Errorf("Expected removed element URL to be 'b', got '%s'", value.URL)
 	}
 	if q.Length() != 1 {
 		t.Errorf("Expected queue length to be 1, got %d", q.Length())
 	}
 
-	value = q.Remove()
-	if !bytes.Equal(value, []byte("c")) {
-		t.Errorf("Expected removed element to be 'c', got '%s'", value)
+	value, err = q.Remove()
+	if err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
+	if value.URL != "c" {
+		t.Errorf("Expected removed element URL to be 'c', got '%s'", value.URL)
 	}
 	if q.Length() != 0 {
 		t.Errorf("Expected queue length to be 0, got %d", q.Length())
 	}
 
-	value = q.Remove()
-	if len(value) != 0 {
-		t.Errorf("Queue should be empty and return an empty slice, got '%s'", value)
+	value, err = q.Remove()
+	if err == nil {
+		t.Errorf("Expected error when removing from empty queue, got nil")
+	}
+	if !reflect.DeepEqual(value, models.PageData{}) {
+		t.Errorf("Expected removed element to be zero value, got %v", value)
 	}
 }
 
@@ -209,7 +240,7 @@ func TestIsEmpty(t *testing.T) {
 	if !q.IsEmpty() {
 		t.Errorf("Expected queue to be empty")
 	}
-	q.Insert([]byte("a"))
+	q.Insert(models.PageData{URL: "a"})
 	if q.IsEmpty() {
 		t.Errorf("Expected queue to not be empty")
 	}

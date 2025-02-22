@@ -1,45 +1,64 @@
-// cmd/indexer/main.go
 package main
 
 import (
-    "log"
+	"context"
+	"fmt"
+	"indexer/internal/pkg/indexer"
+	"indexer/internal/pkg/models"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
-    "github.com/elastic/go-elasticsearch/v8"
-    "github.com/elastic/go-elasticsearch/v8/esutil"
-    "indexer/internal/pkg/indexer"
-    "indexer/internal/pkg/queue"
 )
 
 func main() {
-	q, err := queue.CreateQueue(1000)
-	if err != nil {
-		log.Fatalf("Error creating queue: %v", err)
-	}
 
-	esClient, err := elasticsearch.NewClient(elasticsearch.Config{
-		Addresses: []string{"http://localhost:9200"},
-	})
-	if err != nil {
-		log.Fatalf("Error creating Elasticsearch client: %v", err)
-	}
+    // Construct our indexer
+    idx := indexer.New()
 
-	bulkIndexer, err := esutil.NewBulkIndexer(esutil.BulkIndexerConfig{
-		Client:     esClient,
-		Index:      "webpages",
-		NumWorkers: 4,
-		FlushBytes: 5 * 1024 * 1024,
-	})
-	if err != nil {
-		log.Fatalf("Error creating BulkIndexer: %v", err)
-	}
+    // Create a cancellable context so we can gracefully shut down.
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
 
-	// Instantiate and start the indexer with a 100ms poll interval.
-	idx := indexer.New(q, bulkIndexer, 100 * time.Millisecond)
-	idx.Start()
+    // Start the indexer in a background goroutine.
+    if err := idx.StartProcessing(ctx); err != nil {
+        log.Fatalf("failed to start indexer processing: %v", err)
+    }
 
-	// Your HTTP server or other components can now insert items into the queue.
-	// For example:
-	// q.Insert([]byte(`{"url": "https://example.com", "title": "Example"}`))
+    // In future, the indexer will accept incoming HTTP requests here that call idx.EnqueuePageData.
+    // For now, let's just demonstrate how we might do one Enqueue:
+    go func() {
+        testData := fakePageData()
+        if err := idx.EnqueuePageData(ctx, testData); err != nil {
+            log.Printf("failed to enqueue test data: %v", err)
+        } else {
+            log.Println("successfully enqueued test data")
+        }
+    }()
 
-	select {} // block forever (or use a proper graceful shutdown mechanism)
+    // Listen for OS signals to gracefully shut down.
+    sigChan := make(chan os.Signal, 1)
+    signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+    select {
+    case s := <-sigChan:
+        fmt.Printf("received signal %s, shutting down...\n", s)
+        cancel()
+    }
+
+    // Give some time for cleanup if needed
+    time.Sleep(2 * time.Second)
+    log.Println("indexer shutdown complete")
+}
+
+func fakePageData() models.PageData{
+    return models.PageData{
+		URL:             "https://example.com",
+		CanonicalURL:    "https://example.com",
+		Title:           "Example Domain",
+		Charset:         "UTF-8",
+		MetaDescription: "This is an example domain used for illustrative examples in documents.",
+		MetaKeywords:    "example, domain",
+    }
 }

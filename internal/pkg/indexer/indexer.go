@@ -1,102 +1,58 @@
 package indexer
 
 import (
-    "bytes"
     "context"
-    "encoding/json"
-    "log"
-	"time"
-    "github.com/elastic/go-elasticsearch/v8/esutil"
+    "fmt"
+	"log"
+    "indexer/internal/pkg/models"
     "indexer/internal/pkg/queue"
 )
 
-// Indexer is responsible for reading documents from the queue and
-// indexing them into Elasticsearch using the BulkIndexer.
-type Indexer struct {
-	Queue        *queue.Queue
-	BulkIndexer  esutil.BulkIndexer
-	PollInterval time.Duration // time to wait when the queue is empty
+// Indexer interface defines the methods that an indexer should implement.
+type Indexer interface {
+    EnqueuePageData(ctx context.Context, data models.PageData) error
+    StartProcessing(ctx context.Context) error
 }
 
-// New creates a new Indexer.
-func New(q *queue.Queue, bulkIndexer esutil.BulkIndexer, pollInterval time.Duration) *Indexer {
-	return &Indexer{
-		Queue:        q,
-		BulkIndexer:  bulkIndexer,
-		PollInterval: pollInterval,
+// implementation of the Indexer interface.
+type indexer struct {
+    // queue is the in-memory slice-based queue (already implemented).
+    queue *queue.Queue
+
+    // other configs, e.g. concurrency or ES connection strings, might go here.
+}
+
+// New creates a new instance of an indexer.
+func New() Indexer {
+	// Create/initialize the queue.
+	pageQueue, err := queue.CreateQueue(1000)
+	if err != nil {
+		log.Fatalf("failed to create queue: %v", err)
 	}
+    return &indexer{
+        queue: pageQueue,
+    }
 }
 
-// Start launches a background goroutine that continuously polls the queue
-// and indexes any available documents.
-func (i *Indexer) Start() {
-	go i.processQueue()
+func (i *indexer) EnqueuePageData(ctx context.Context, data models.PageData) error {
+    // This quickly returns so the crawler can move on.
+    return i.queue.Insert(data)
 }
 
-// processQueue continuously polls the queue for new documents.
-func (i *Indexer) processQueue() {
-	for {
-		// Check if the queue is empty.
-		if i.Queue.IsEmpty() {
-			// Sleep for the poll interval before checking again.
-			time.Sleep(i.PollInterval)
-			continue
-		}
-
-		// Remove an item from the queue.
-		item := i.Queue.Remove()
-		if item == nil {
-			// Should not happen since IsEmpty() returned false,
-			// but safeguard against nil items.
-			continue
-		}
-
-		// Unmarshal the JSON payload.
-		var doc map[string]interface{}
-		if err := json.Unmarshal(item, &doc); err != nil {
-			log.Printf("Error unmarshaling document: %v", err)
-			continue
-		}
-
-		// Optionally use a field (e.g. URL) as the document ID.
-		docID := ""
-		if url, ok := doc["url"].(string); ok {
-			docID = url
-		}
-
-		// Re-marshal the document to ensure it is in proper JSON format.
-		docBytes, err := json.Marshal(doc)
-		if err != nil {
-			log.Printf("Error marshaling document: %v", err)
-			continue
-		}
-
-		// Wrap the document in a bytes.Reader, which implements io.ReadSeeker.
-		reader := bytes.NewReader(docBytes)
-
-		// Add the document to the BulkIndexer.
-		err = i.BulkIndexer.Add(
-			context.Background(),
-			esutil.BulkIndexerItem{
-				Action:     "index", // "create" can be used to avoid overwriting
-				DocumentID: docID,
-				Body:       reader,
-				OnFailure: 	func(
-					ctx context.Context,
-					item esutil.BulkIndexerItem,
-					resp esutil.BulkIndexerResponseItem,
-					err error,
-				) {
-					if err != nil {
-						log.Printf("Bulk indexer error: %v", err)
-					} else {
-						log.Printf("Bulk indexer failure: %s: %s", resp.Error.Type, resp.Error.Reason)
-					}
-				},
-			},
-		)
-		if err != nil {
-			log.Printf("Error adding document to BulkIndexer: %v", err)
-		}
-	}
+// Will eventually handle reading items from the queue and passing them to the processing pipeline.
+func (i *indexer) StartProcessing(ctx context.Context) error {
+    go func() {
+        for {
+            select {
+            case <-ctx.Done():
+                fmt.Println("context canceled, stopping indexer processing")
+                return
+            default:
+                // In a real implementation, we'd Dequeue and process each item
+                // (do cleanup, NLP, dedupe, spam check, etc.)
+                // For Step 1, we leave this as a placeholder.
+            }
+        }
+    }()
+    return nil
 }
