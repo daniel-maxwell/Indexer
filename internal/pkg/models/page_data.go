@@ -2,7 +2,7 @@ package models
 
 import "time"
 
-// Data structure to organize and store relevant information from the page
+// Input data structure from the web crawler.
 type PageData struct {
     URL             string              `json:"url"`
     CanonicalURL    string              `json:"canonical_url"`

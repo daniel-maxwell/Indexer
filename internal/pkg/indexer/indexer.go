@@ -1,81 +1,127 @@
 package indexer
 
 import (
-    "context"
+	"bytes"
+	"context"
+	"encoding/json"
+	"indexer/internal/pkg/models"
 	"log"
-	"time"
-    "indexer/internal/pkg/models"
-    "indexer/internal/pkg/queue"
-	"indexer/internal/pkg/processor"
+	"net/http"
+	"sync"
 )
 
-// Indexer interface defines the methods that an indexer should implement.
-type Indexer interface {
-    EnqueuePageData(ctx context.Context, data models.PageData) error
-    StartProcessing(ctx context.Context) error
+// Buffers documents until a threshold is reached or a flush interval elapses.
+type BulkIndexer struct {
+	mutex         sync.Mutex
+	buffer        []*models.Document
+	threshold     int
+	flushChannel  chan struct{}
+	elasticURL    string // elasticURL is the endpoint for the Elasticsearch Bulk API.
 }
 
-// indexer is an implementation of the Indexer interface.
-type indexer struct {
-    queue *queue.Queue
-	processor processor.Processor
-	deduper   processor.Deduper
-}
-
-// New creates a new instance of an indexer.
-func New() Indexer {
-	// Create/initialize the queue.
-	pageQueue, err := queue.CreateQueue(1000)
-	if err != nil {
-		log.Fatalf("failed to create queue: %v", err)
+// Creates a new BulkIndexer.
+func NewBulkIndexer(threshold int, elasticURL string) *BulkIndexer {
+	bulkIndexer := &BulkIndexer{
+		buffer:        make([]*models.Document, 0, threshold),
+		threshold:     threshold,
+		flushChannel:  make(chan struct{}, 1),
+		elasticURL:    elasticURL,
 	}
-    return &indexer{
-        queue:     pageQueue,
-        processor: processor.NewProcessor(),
-        deduper:   processor.NewDeduper(),
-    }
+	go bulkIndexer.startFlushing()
+	return bulkIndexer
 }
 
-func (i *indexer) EnqueuePageData(ctx context.Context, data models.PageData) error {
-    // This quickly returns so the crawler can move on.
-    return i.queue.Insert(data)
+// Runs in a goroutine and flushes the buffer periodically or when signaled.
+func (bulkIndexer *BulkIndexer) startFlushing() {
+	for {
+		select {
+		case <-bulkIndexer.flushChannel:
+			bulkIndexer.flush()
+		}
+	}
 }
 
-// Will eventually handle reading items from the queue and passing them to the processing pipeline.
-func (i *indexer) StartProcessing(ctx context.Context) error {
-    go func() {
-        for {
-            select {
-            case <-ctx.Done():
-                log.Println("context canceled, stopping indexer processing")
-                return
-            default:
-                item, err := i.queue.Remove()
-                if err != nil {
-                    time.Sleep(200 * time.Millisecond)
-                    continue
-                }
+// Adds a document to the buffer.
+// If the threshold is reached, it signals a flush.
+func (bulkIndexer *BulkIndexer) AddDocumentToIndexerPayload(doc *models.Document) {
+	bulkIndexer.mutex.Lock()
+	bulkIndexer.buffer = append(bulkIndexer.buffer, doc)
+	// Signal flush if threshold is reached.
+	if len(bulkIndexer.buffer) >= bulkIndexer.threshold {
+		select {
+		case bulkIndexer.flushChannel <- struct{}{}:
+		default:
+			// flush already signaled
+		}
+	}
+	bulkIndexer.mutex.Unlock()
+}
 
-                cleaned, err := i.processor.CleanAndNormalize(item)
-                if err != nil {
-                    log.Printf("[SKIP] %s => %v", item.URL, err)
-                    continue
-                }
+// Builds an NDJSON payload from buffered documents and sends it to Elasticsearch.
+func (bulkIndexer *BulkIndexer) flush() {
+	bulkIndexer.mutex.Lock()
+	if len(bulkIndexer.buffer) == 0 {
+		bulkIndexer.mutex.Unlock()
+		return
+	}
+	docsToIndex := bulkIndexer.buffer
+	bulkIndexer.buffer = make([]*models.Document, 0, bulkIndexer.threshold)
+	bulkIndexer.mutex.Unlock()
 
-                // Now that we have a valid, non-spammy, English doc, let's check duplicates.
-                sig := processor.GenerateSignature(cleaned.VisibleText)
-                if i.deduper.IsDuplicate(sig) {
-                    log.Printf("[SKIP - DUPLICATE] %s => near-duplicate found", cleaned.URL)
-                    continue
-                }
+	var ndjsonPayload bytes.Buffer
+	for _, doc := range docsToIndex {
+		// Build the metadata action line for indexing.
+		meta := map[string]map[string]string{
+			"index": {
+				"_index": "documents", // Adjust index name as needed.
+				// Optionally include "_id": "your-document-id"
+			},
+		}
+		metaLine, err := json.Marshal(meta)
+		if err != nil {
+			log.Printf("failed to marshal meta line: %v", err)
+			continue
+		}
+		ndjsonPayload.Write(metaLine)
+		ndjsonPayload.WriteByte('\n')
 
-                // Not a duplicate, so store signature
-                i.deduper.StoreSignature(sig)
+		// Marshal the actual document.
+		docLine, err := json.Marshal(doc)
+		if err != nil {
+			log.Printf("failed to marshal document: %v", err)
+			continue
+		}
+		ndjsonPayload.Write(docLine)
+		ndjsonPayload.WriteByte('\n')
+	}
 
-                // This doc passes all checks. Next step would be NLP, then indexing, etc.
-                log.Printf("Document is unique. Ready for next step: %+v\n", cleaned)
-            }
-        }
-    }()
-    return nil
+	log.Printf("Flushing %d documents to Elasticsearch", len(docsToIndex))
+	// For now, we log the NDJSON payload.
+	log.Printf("NDJSON payload:\n%s", ndjsonPayload.String())
+
+	// Asynchronously send the payload to Elasticsearch.
+	go bulkIndexer.sendBulkRequest(ndjsonPayload.Bytes())
+}
+
+// Sends the NDJSON payload to Elasticsearch's Bulk API.
+func (bulkIndexer *BulkIndexer) sendBulkRequest(payload []byte) {
+	request, err := http.NewRequestWithContext(context.Background(), "POST", bulkIndexer.elasticURL, bytes.NewReader(payload))
+	if err != nil {
+		log.Printf("failed to create bulk request: %v", err)
+		return
+	}
+	request.Header.Set("Content-Type", "application/x-ndjson")
+
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		log.Printf("bulk request failed: %v", err)
+		return
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode >= 200 && response.StatusCode < 300 {
+		log.Println("bulk indexing successful")
+	} else {
+		log.Printf("bulk indexing failed with status: %s", response.Status)
+	}
 }

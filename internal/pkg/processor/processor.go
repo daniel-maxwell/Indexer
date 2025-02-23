@@ -11,121 +11,143 @@ import (
 
 )
 
-// Defines all the steps needed to transform raw PageData
-// into a cleaned, normalized version that’s ready for further checks.
+// Defines the high-level interface for processing page data.
 type Processor interface {
-    CleanAndNormalize(pd models.PageData) (models.PageData, error)
+	// Process runs the complete data processing pipeline.
+	// It operates directly on the provided PageData and Document.
+	Process(pd *models.PageData, doc *models.Document) error
 }
 
-// Default implementation of Processor.
-type processor struct{}
+// The default implementation of Processor.
+type processor struct {
+	deduper  Deduper
+	enricher Enricher
+}
 
-// Creates a new Processor instance.
+// Creates a new Processor instance and wires in the sub‑components.
 func NewProcessor() Processor {
-    return &processor{}
+	return &processor{
+		deduper:  NewDeduper(),
+		enricher: NewNLPEnricher(),
+	}
 }
 
-func (p *processor) CleanAndNormalize(pd models.PageData) (models.PageData, error) {
-    // Basic HTML cleanup
-    pd.VisibleText = basicHTMLCleanup(pd.VisibleText)
+// Runs the data processing pipeline:
+// cleaning/normalization, deduplication, and enrichment.
+func (processor *processor) Process(pageData *models.PageData, doc *models.Document) error {
+	// Clean and normalize the data.
+	if err := cleanAndNormalize(pageData, doc); err != nil {
+		return err
+	}
 
-    // URL normalization for primary URL, canonical URL, internal/external links
-    var err error
-    pd.URL, err = normalizeURL(pd.URL)
-    if err != nil {
-        // We can choose to skip if URL is invalid, or just log the error
-        log.Printf("invalid URL %q: %v", pd.URL, err)
-        return pd, err
-    }
+	// Deduplication: generate a signature from the visible text.
+	signature := GenerateSignature(pageData.VisibleText)
+	if processor.deduper.IsDuplicate(signature) {
+		return errors.New("duplicate page detected")
+	}
 
-    canonical, err := normalizeURL(pd.CanonicalURL)
-    if err == nil {
-        pd.CanonicalURL = canonical
-    }
+	// Enrich the document.
+	if err := processor.enricher.Enrich(pageData, doc); err != nil {
+		return err
+	}
 
-    pd.InternalLinks = normalizeURLs(pd.InternalLinks)
-    pd.ExternalLinks = normalizeURLs(pd.ExternalLinks)
-
-    // Language detection
-    lang, err := detectLanguage(pd.VisibleText)
-    if err != nil {
-        log.Printf("language detection failed: %v", err)
-        return pd, err
-    }
-    if lang != "en" {
-        // Not English, we skip
-        return pd, errors.New("not an English page, skipping")
-    }
-    pd.Language = lang
-
-    // Spam filtering
-    if isSpam(pd.VisibleText) {
-        return pd, errors.New("spam detected, skipping")
-    }
-
-    // If we reach here, we have a cleaned, normalized, English, non-spam page
-    return pd, nil
+	// Mark the page as processed.
+	processor.deduper.StoreSignature(signature)
+	return nil
 }
 
-// Basic HTML cleanup: removes extra whitespace and newlines
+// cleanAndNormalize applies cleaning, URL normalization, language detection,
+// and spam filtering. It updates the PageData and Document in place.
+func cleanAndNormalize(pageData *models.PageData, doc *models.Document) error {
+	// Basic HTML cleanup.
+	doc.VisibleText = basicHTMLCleanup(pageData.VisibleText)
+
+	// Normalize primary URL.
+	var err error
+	doc.URL, err = normalizeURL(pageData.URL)
+	if err != nil {
+		log.Printf("invalid URL %q: %v", pageData.URL, err)
+		return err
+	}
+
+	// Normalize canonical URL if valid.
+	if canonical, err := normalizeURL(pageData.CanonicalURL); err == nil {
+		pageData.CanonicalURL = canonical
+	}
+
+	// Normalize internal and external links.
+	pageData.InternalLinks = normalizeURLs(pageData.InternalLinks)
+	pageData.ExternalLinks = normalizeURLs(pageData.ExternalLinks)
+
+	// Language detection.
+	lang, err := detectLanguage(pageData.VisibleText)
+	if err != nil {
+		log.Printf("language detection failed: %v", err)
+	}
+	if lang != "en" {
+		return errors.New("not an English page, skipping")
+	}
+	pageData.Language = lang
+
+	// Spam filtering.
+	if isSpam(pageData.VisibleText) {
+		return errors.New("spam detected, skipping")
+	}
+
+	return nil
+}
+
+// Removes extra whitespace and newlines.
 func basicHTMLCleanup(input string) string {
-    cleaned := strings.TrimSpace(input)
-    cleaned = strings.Join(strings.Fields(cleaned), " ")
-    return cleaned
+	cleaned := strings.TrimSpace(input)
+	return strings.Join(strings.Fields(cleaned), " ")
 }
 
-// Normalizes a URL, returning an error if it fails parsing
-func normalizeURL(raw string) (string, error) {
-    raw = strings.TrimSpace(raw)
-    if raw == "" {
-        return "", errors.New("empty URL")
-    }
-
-    u, err := url.Parse(raw)
-    if err != nil {
-        return "", err
-    }
-
-    u.Scheme = strings.ToLower(u.Scheme)
-    u.Host = strings.ToLower(u.Host)
-    return u.String(), nil
+// Trims, parses, and normalizes a URL.
+func normalizeURL(rawURL string) (string, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return "", errors.New("empty URL")
+	}
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+	parsedURL.Scheme = strings.ToLower(parsedURL.Scheme)
+	parsedURL.Host = strings.ToLower(parsedURL.Host)
+	return parsedURL.String(), nil
 }
 
-// Normalizes a slice of URLs, skipping those that fail parsing
+// Processes a slice of URLs and returns only those that are valid.
 func normalizeURLs(urls []string) []string {
-    var result []string
-    for _, link := range urls {
-        normalized, err := normalizeURL(link)
-        if err == nil {
-            result = append(result, normalized)
-        }
-    }
-    return result
+	var result []string
+	for _, link := range urls {
+		if normalized, err := normalizeURL(link); err == nil {
+			result = append(result, normalized)
+		}
+	}
+	return result
 }
 
-// For now, this is a placeholder that always returns "en" or an error.
+// Placeholder. Returns "en" if the text is long enough.
 func detectLanguage(text string) (string, error) {
-    if len(text) < 10 {
-        return "", errors.New("text too short for language detection")
-    }
-    return "en", nil
+	if len(text) < 10 {
+		return "", errors.New("text too short for language detection")
+	}
+	return "en", nil
 }
 
-// Very naive spam checker for now. Does a simple check for either 
-// extremely short text or certain suspicious keywords repeated too often.
+// Placeholder. Implements a naive spam check.
 func isSpam(text string) bool {
-    // Too short
-    if len(text) < 30 {
-        return true
-    }
-
-    // Suspicious repeated keywords
-    suspiciousKeywords := []string{"buy now", "cheap pills", "viagra", "bitcoin scam"}
-    lower := strings.ToLower(text)
-    for _, keyword := range suspiciousKeywords {
-        if strings.Count(lower, keyword) > 3 {
-            return true
-        }
-    }
-    return false
+	if len(text) < 30 {
+		return true
+	}
+	suspiciousKeywords := []string{"buy now", "cheap pills", "viagra", "bitcoin scam"}
+	lower := strings.ToLower(text)
+	for _, keyword := range suspiciousKeywords {
+		if strings.Count(lower, keyword) > 3 {
+			return true
+		}
+	}
+	return false
 }

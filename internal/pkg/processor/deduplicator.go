@@ -1,48 +1,47 @@
 package processor
 
 import (
-    "crypto/sha256"
-    "encoding/hex"
-    "sync"
+	"crypto/sha256"
+	"encoding/hex"
+	"sync"
 )
 
-// Deduper describes how we check for near-duplicates.
+// Defines the interface for duplicate checking.
 type Deduper interface {
-    IsDuplicate(signature string) bool
-    StoreSignature(signature string)
+	IsDuplicate(signature string) bool
+	StoreSignature(signature string)
 }
 
-// memoryDeduper is a naive in-memory store of signatures.
+// A naive in-memory implementation of Deduper.
 type memoryDeduper struct {
-    mu         sync.RWMutex
-    signatures map[string]struct{}
+	mu         sync.RWMutex
+	signatures map[string]struct{}
 }
 
-// NewDeduper returns a new Deduper instance backed by an in-memory map.
+// Creates a new Deduper instance backed by an in-memory map.
 func NewDeduper() Deduper {
-    return &memoryDeduper{
-        signatures: make(map[string]struct{}),
-    }
+	return &memoryDeduper{
+		signatures: make(map[string]struct{}),
+	}
 }
 
+// Checks if a signature has already been stored.
 func (d *memoryDeduper) IsDuplicate(signature string) bool {
-    d.mu.RLock()
-    defer d.mu.RUnlock()
-
-    _, found := d.signatures[signature]
-    return found
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	_, found := d.signatures[signature]
+	return found
 }
 
+// Stores the given signature.
 func (d *memoryDeduper) StoreSignature(signature string) {
-    d.mu.Lock()
-    defer d.mu.Unlock()
-
-    d.signatures[signature] = struct{}{}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.signatures[signature] = struct{}{}
 }
 
-// GenerateSignature is a helper to create a hash from text.
-// Here, we do a simple SHA-256. 
+// Creates a SHA-256 hash of the provided text.
 func GenerateSignature(text string) string {
-    sum := sha256.Sum256([]byte(text))
-    return hex.EncodeToString(sum[:])
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])
 }
