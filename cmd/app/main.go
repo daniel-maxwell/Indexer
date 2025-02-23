@@ -60,5 +60,6 @@ func fakePageData() models.PageData{
 		Charset:         "UTF-8",
 		MetaDescription: "This is an example domain used for illustrative examples in documents.",
 		MetaKeywords:    "example, domain",
+		VisibleText:     "Example Domain This domain is for use in illustrative examples in documents. You may use this domain in literature without prior coordination or asking for permission.",
     }
 }
