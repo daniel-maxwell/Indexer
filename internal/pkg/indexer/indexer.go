@@ -2,11 +2,11 @@ package indexer
 
 import (
     "context"
-    "fmt"
 	"log"
 	"time"
     "indexer/internal/pkg/models"
     "indexer/internal/pkg/queue"
+	"indexer/internal/pkg/processor"
 )
 
 // Indexer interface defines the methods that an indexer should implement.
@@ -17,11 +17,9 @@ type Indexer interface {
 
 // indexer is an implementation of the Indexer interface.
 type indexer struct {
-    // queue is the in-memory slice-based queue (already implemented).
     queue *queue.Queue
-	processor Processor
-
-    // other configs, e.g. concurrency or ES connection strings, might go here.
+	processor processor.Processor
+	deduper   processor.Deduper
 }
 
 // New creates a new instance of an indexer.
@@ -32,8 +30,9 @@ func New() Indexer {
 		log.Fatalf("failed to create queue: %v", err)
 	}
     return &indexer{
-        queue: pageQueue,
-		processor: NewProcessor(),
+        queue:     pageQueue,
+        processor: processor.NewProcessor(),
+        deduper:   processor.NewDeduper(),
     }
 }
 
@@ -44,34 +43,37 @@ func (i *indexer) EnqueuePageData(ctx context.Context, data models.PageData) err
 
 // Will eventually handle reading items from the queue and passing them to the processing pipeline.
 func (i *indexer) StartProcessing(ctx context.Context) error {
-    // For now, run in a single goroutine. 
-    // In future this will spawn multiple worker goroutines for concurrency.
     go func() {
         for {
             select {
             case <-ctx.Done():
-                fmt.Println("context canceled, stopping indexer processing")
+                log.Println("context canceled, stopping indexer processing")
                 return
             default:
-                // Attempt to grab an item from the queue
                 item, err := i.queue.Remove()
                 if err != nil {
-                    // If the queue is empty, we can sleep briefly to avoid busy-looping
                     time.Sleep(200 * time.Millisecond)
                     continue
                 }
 
-                // Next, run our HTML cleanup & URL normalization
                 cleaned, err := i.processor.CleanAndNormalize(item)
                 if err != nil {
-                    log.Printf("error cleaning/normalizing: %v", err)
+                    log.Printf("[SKIP] %s => %v", item.URL, err)
                     continue
                 }
 
-                // For now, just log the results. 
-                log.Printf("Cleaned & normalized item: %+v\n", cleaned)
+                // Now that we have a valid, non-spammy, English doc, let's check duplicates.
+                sig := processor.GenerateSignature(cleaned.VisibleText)
+                if i.deduper.IsDuplicate(sig) {
+                    log.Printf("[SKIP - DUPLICATE] %s => near-duplicate found", cleaned.URL)
+                    continue
+                }
 
-                // Additional pipeline steps (next increments).
+                // Not a duplicate, so store signature
+                i.deduper.StoreSignature(sig)
+
+                // This doc passes all checks. Next step would be NLP, then indexing, etc.
+                log.Printf("Document is unique. Ready for next step: %+v\n", cleaned)
             }
         }
     }()
