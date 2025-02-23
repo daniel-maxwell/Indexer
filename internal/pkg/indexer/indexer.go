@@ -1,127 +1,128 @@
 package indexer
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"indexer/internal/pkg/models"
-	"log"
-	"net/http"
-	"sync"
+    "bytes"
+    "context"
+    "encoding/json"
+    "indexer/internal/logger"
+    "indexer/internal/pkg/models"
+    "net/http"
+    "sync"
+    "go.uber.org/zap"
 )
 
 // Buffers documents until a threshold is reached or a flush interval elapses.
 type BulkIndexer struct {
-	mutex         sync.Mutex
-	buffer        []*models.Document
-	threshold     int
-	flushChannel  chan struct{}
-	elasticURL    string // elasticURL is the endpoint for the Elasticsearch Bulk API.
+    mutex        sync.Mutex
+    buffer       []*models.Document
+    threshold    int
+    flushChannel chan struct{}
+    elasticURL string
+    indexName  string
 }
 
 // Creates a new BulkIndexer.
-func NewBulkIndexer(threshold int, elasticURL string) *BulkIndexer {
-	bulkIndexer := &BulkIndexer{
-		buffer:        make([]*models.Document, 0, threshold),
-		threshold:     threshold,
-		flushChannel:  make(chan struct{}, 1),
-		elasticURL:    elasticURL,
-	}
-	go bulkIndexer.startFlushing()
-	return bulkIndexer
+func NewBulkIndexer(threshold int, elasticURL, indexName string) *BulkIndexer {
+    indexer := &BulkIndexer{
+        buffer:       make([]*models.Document, 0, threshold),
+        threshold:    threshold,
+        flushChannel: make(chan struct{}, 1),
+        elasticURL:   elasticURL,
+        indexName:    indexName,
+    }
+    go indexer.startFlushing()
+    return indexer
 }
 
-// Runs in a goroutine and flushes the buffer periodically or when signaled.
-func (bulkIndexer *BulkIndexer) startFlushing() {
-	for {
-		select {
-		case <-bulkIndexer.flushChannel:
-			bulkIndexer.flush()
-		}
-	}
+// Runs in a goroutine and flushes when signaled.
+func (indexer *BulkIndexer) startFlushing() {
+    for {
+        select {
+        case <-indexer.flushChannel:
+            indexer.flush()
+        }
+    }
 }
 
-// Adds a document to the buffer.
-// If the threshold is reached, it signals a flush.
-func (bulkIndexer *BulkIndexer) AddDocumentToIndexerPayload(doc *models.Document) {
-	bulkIndexer.mutex.Lock()
-	bulkIndexer.buffer = append(bulkIndexer.buffer, doc)
-	// Signal flush if threshold is reached.
-	if len(bulkIndexer.buffer) >= bulkIndexer.threshold {
-		select {
-		case bulkIndexer.flushChannel <- struct{}{}:
-		default:
-			// flush already signaled
-		}
-	}
-	bulkIndexer.mutex.Unlock()
+// Adds a doc to the buffer and signals flush if threshold is met.
+func (indexer *BulkIndexer) AddDocumentToIndexerPayload(doc *models.Document) {
+    indexer.mutex.Lock()
+    defer indexer.mutex.Unlock()
+
+    indexer.buffer = append(indexer.buffer, doc)
+    // If threshold is reached, signal a flush
+    if len(indexer.buffer) >= indexer.threshold {
+        select {
+			case indexer.flushChannel <- struct{}{}:
+			default:
+				// flush already signaled
+        }
+    }
 }
 
-// Builds an NDJSON payload from buffered documents and sends it to Elasticsearch.
-func (bulkIndexer *BulkIndexer) flush() {
-	bulkIndexer.mutex.Lock()
-	if len(bulkIndexer.buffer) == 0 {
-		bulkIndexer.mutex.Unlock()
-		return
-	}
-	docsToIndex := bulkIndexer.buffer
-	bulkIndexer.buffer = make([]*models.Document, 0, bulkIndexer.threshold)
-	bulkIndexer.mutex.Unlock()
+// Builds NDJSON payload and sends it to Elasticsearch.
+func (indexer *BulkIndexer) flush() {
+    indexer.mutex.Lock()
+    if len(indexer.buffer) == 0 {
+        indexer.mutex.Unlock()
+        return
+    }
+    docsToIndex := indexer.buffer
+    indexer.buffer = make([]*models.Document, 0, indexer.threshold)
+    indexer.mutex.Unlock()
 
-	var ndjsonPayload bytes.Buffer
-	for _, doc := range docsToIndex {
-		// Build the metadata action line for indexing.
-		meta := map[string]map[string]string{
-			"index": {
-				"_index": "documents", // Adjust index name as needed.
-				// Optionally include "_id": "your-document-id"
-			},
-		}
-		metaLine, err := json.Marshal(meta)
-		if err != nil {
-			log.Printf("failed to marshal meta line: %v", err)
-			continue
-		}
-		ndjsonPayload.Write(metaLine)
-		ndjsonPayload.WriteByte('\n')
+    // Build NDJSON
+    var ndjsonPayload bytes.Buffer
+    for _, doc := range docsToIndex {
+        // TODO: define doc IDs, e.g. from doc.URL
+        meta := map[string]map[string]string{
+            "index": {
+                "_index": indexer.indexName,
+                // "_id": "custom-id-based-on-url-or-hash",
+            },
+        }
+        metaLine, err := json.Marshal(meta)
+        if err != nil {
+            logger.Log.Error("Failed to marshal meta line", zap.Error(err))
+            continue
+        }
+        ndjsonPayload.Write(metaLine)
+        ndjsonPayload.WriteByte('\n')
 
-		// Marshal the actual document.
-		docLine, err := json.Marshal(doc)
-		if err != nil {
-			log.Printf("failed to marshal document: %v", err)
-			continue
-		}
-		ndjsonPayload.Write(docLine)
-		ndjsonPayload.WriteByte('\n')
-	}
+        docLine, err := json.Marshal(doc)
+        if err != nil {
+            logger.Log.Error("Failed to marshal document", zap.Error(err))
+            continue
+        }
+        ndjsonPayload.Write(docLine)
+        ndjsonPayload.WriteByte('\n')
+    }
 
-	log.Printf("Flushing %d documents to Elasticsearch", len(docsToIndex))
-	// For now, we log the NDJSON payload.
-	log.Printf("NDJSON payload:\n%s", ndjsonPayload.String())
+    logger.Log.Info("Flushing documents to Elasticsearch", zap.Int("count", len(docsToIndex)))
 
-	// Asynchronously send the payload to Elasticsearch.
-	go bulkIndexer.sendBulkRequest(ndjsonPayload.Bytes())
+    // Asynchronously send the payload
+    go indexer.sendBulkRequest(ndjsonPayload.Bytes())
 }
 
-// Sends the NDJSON payload to Elasticsearch's Bulk API.
-func (bulkIndexer *BulkIndexer) sendBulkRequest(payload []byte) {
-	request, err := http.NewRequestWithContext(context.Background(), "POST", bulkIndexer.elasticURL, bytes.NewReader(payload))
-	if err != nil {
-		log.Printf("failed to create bulk request: %v", err)
-		return
-	}
-	request.Header.Set("Content-Type", "application/x-ndjson")
+// Sends the bulk payload to Elasticsearch.
+func (indexer *BulkIndexer) sendBulkRequest(payload []byte) {
+    request, err := http.NewRequestWithContext(context.Background(), "POST", indexer.elasticURL, bytes.NewReader(payload))
+    if err != nil {
+        logger.Log.Error("Failed to create bulk request", zap.Error(err))
+        return
+    }
+    request.Header.Set("Content-Type", "application/x-ndjson")
 
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		log.Printf("bulk request failed: %v", err)
-		return
-	}
-	defer response.Body.Close()
+    response, err := http.DefaultClient.Do(request)
+    if err != nil {
+        logger.Log.Error("Bulk request failed", zap.Error(err))
+        return
+    }
+    defer response.Body.Close()
 
-	if response.StatusCode >= 200 && response.StatusCode < 300 {
-		log.Println("bulk indexing successful")
-	} else {
-		log.Printf("bulk indexing failed with status: %s", response.Status)
-	}
+    if response.StatusCode >= 200 && response.StatusCode < 300 {
+        logger.Log.Info("Bulk indexing successful", zap.Int("status_code", response.StatusCode))
+    } else {
+        logger.Log.Warn("Bulk indexing failed", zap.Int("status_code", response.StatusCode))
+    }
 }
