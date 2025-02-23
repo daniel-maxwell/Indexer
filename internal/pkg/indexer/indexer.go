@@ -4,6 +4,7 @@ import (
     "context"
     "fmt"
 	"log"
+	"time"
     "indexer/internal/pkg/models"
     "indexer/internal/pkg/queue"
 )
@@ -14,10 +15,11 @@ type Indexer interface {
     StartProcessing(ctx context.Context) error
 }
 
-// implementation of the Indexer interface.
+// indexer is an implementation of the Indexer interface.
 type indexer struct {
     // queue is the in-memory slice-based queue (already implemented).
     queue *queue.Queue
+	processor Processor
 
     // other configs, e.g. concurrency or ES connection strings, might go here.
 }
@@ -31,6 +33,7 @@ func New() Indexer {
 	}
     return &indexer{
         queue: pageQueue,
+		processor: NewProcessor(),
     }
 }
 
@@ -41,6 +44,8 @@ func (i *indexer) EnqueuePageData(ctx context.Context, data models.PageData) err
 
 // Will eventually handle reading items from the queue and passing them to the processing pipeline.
 func (i *indexer) StartProcessing(ctx context.Context) error {
+    // For now, run in a single goroutine. 
+    // In future this will spawn multiple worker goroutines for concurrency.
     go func() {
         for {
             select {
@@ -48,9 +53,25 @@ func (i *indexer) StartProcessing(ctx context.Context) error {
                 fmt.Println("context canceled, stopping indexer processing")
                 return
             default:
-                // In a real implementation, we'd Dequeue and process each item
-                // (do cleanup, NLP, dedupe, spam check, etc.)
-                // For Step 1, we leave this as a placeholder.
+                // Attempt to grab an item from the queue
+                item, err := i.queue.Remove()
+                if err != nil {
+                    // If the queue is empty, we can sleep briefly to avoid busy-looping
+                    time.Sleep(200 * time.Millisecond)
+                    continue
+                }
+
+                // Next, run our HTML cleanup & URL normalization
+                cleaned, err := i.processor.CleanAndNormalize(item)
+                if err != nil {
+                    log.Printf("error cleaning/normalizing: %v", err)
+                    continue
+                }
+
+                // For now, just log the results. 
+                log.Printf("Cleaned & normalized item: %+v\n", cleaned)
+
+                // Additional pipeline steps (next increments).
             }
         }
     }()
