@@ -1,15 +1,17 @@
 package administrator
 
 import (
-    "context"
-    "indexer/internal/config"
-    "indexer/internal/logger"
-    "indexer/internal/pkg/indexer"
-    "indexer/internal/pkg/models"
-    "indexer/internal/pkg/processor"
-    "indexer/internal/pkg/queue"
-    "go.uber.org/zap"
-    "time"
+	"context"
+	"indexer/internal/config"
+	"indexer/internal/logger"
+	"indexer/internal/pkg/deduplicator"
+	"indexer/internal/pkg/indexer"
+	"indexer/internal/pkg/models"
+	"indexer/internal/pkg/processor"
+	"indexer/internal/pkg/queue"
+	"log"
+	"time"
+	"go.uber.org/zap"
 )
 
 // Administrator interface
@@ -34,9 +36,12 @@ func New(cfg *config.Config) Administrator {
         logger.Log.Fatal("Failed to create queue", zap.Error(err))
     }
 
-    deduper := processor.NewDeduper()
+    // Requires a redis instance. docker run -p 6379:6379 --name redis -d redis:6.2
+    deduper, err := deduper.NewRedisDeduper(cfg)
+    if err != nil {
+        log.Fatalf("Failed to create deduper: %v", err)
+    }
 
-    // Note the new arguments for flush interval and maxRetries
     bulkIndexer := indexer.NewBulkIndexer(
         cfg.BulkThreshold,
         cfg.ElasticsearchURL,
@@ -57,6 +62,7 @@ func (admin *administrator) EnqueuePageData(ctx context.Context, data models.Pag
     return admin.queue.Insert(data)
 }
 
+// Processes and indexes the page data
 func (admin *administrator) ProcessAndIndex(ctx context.Context) error {
     go func() {
         for {
@@ -70,10 +76,13 @@ func (admin *administrator) ProcessAndIndex(ctx context.Context) error {
                     time.Sleep(200 * time.Millisecond)
                     continue
                 }
-                document := models.Document{}
+
+                var document models.Document
                 err = admin.processor.Process(&pageData, &document)
                 if err != nil {
-                    logger.Log.Warn("Failed to process page", zap.String("url", pageData.URL), zap.Error(err))
+                    logger.Log.Warn("Failed to process page",
+                        zap.String("url", pageData.URL),
+                        zap.Error(err))
                 } else {
                     logger.Log.Debug("Processed page", zap.String("url", pageData.URL))
                 }

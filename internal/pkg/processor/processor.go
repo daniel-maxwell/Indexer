@@ -7,6 +7,7 @@ import (
     "log"
 	// "github.com/microcosm-cc/bluemonday"
     // "golang.org/x/net/html"
+	"indexer/internal/pkg/deduplicator"
     "indexer/internal/pkg/models"
 
 )
@@ -15,45 +16,45 @@ import (
 type Processor interface {
 	// Process runs the complete data processing pipeline.
 	// It operates directly on the provided PageData and Document.
-	Process(pd *models.PageData, doc *models.Document) error
+	Process(pageData *models.PageData, doc *models.Document) error
 }
 
 // The default implementation of Processor.
 type processor struct {
-	deduper  Deduper
+	deduper  deduper.Deduper
 	enricher Enricher
 }
 
 // Creates a new Processor instance and wires in the sub‑components.
-func NewProcessor(deduper Deduper) Processor {
-	return &processor{
-		deduper:  deduper,
-		enricher: NewNLPEnricher(),
-	}
+func NewProcessor(deduper deduper.Deduper) Processor {
+    return &processor{
+        deduper:  deduper,
+        enricher: NewNLPEnricher(),
+    }
 }
 
 // Runs the data processing pipeline:
 // cleaning/normalization, deduplication, and enrichment.
-func (processor *processor) Process(pageData *models.PageData, doc *models.Document) error {
-	// Clean and normalize the data.
-	if err := cleanAndNormalize(pageData, doc); err != nil {
-		return err
-	}
+func (p *processor) Process(pageData *models.PageData, doc *models.Document) error {
+    // Clean & normalize
+    if err := cleanAndNormalize(pageData, doc); err != nil {
+        return err
+    }
 
-	// Deduplication: generate a signature from the visible text.
-	signature := GenerateSignature(pageData.VisibleText)
-	if processor.deduper.IsDuplicate(signature) {
-		return errors.New("duplicate page detected")
-	}
+    // Dedup check
+    signature := deduper.GenerateSignature(pageData.VisibleText)
+    if p.deduper.IsDuplicate(signature) {
+        return errors.New("duplicate page detected")
+    }
 
-	// Enrich the document.
-	if err := processor.enricher.Enrich(pageData, doc); err != nil {
-		return err
-	}
+    // Enrich doc
+    if err := p.enricher.Enrich(pageData, doc); err != nil {
+        return err
+    }
 
-	// Mark the page as processed.
-	processor.deduper.StoreSignature(signature)
-	return nil
+    // Store signature
+    p.deduper.StoreSignature(signature)
+    return nil
 }
 
 // cleanAndNormalize applies cleaning, URL normalization, language detection,

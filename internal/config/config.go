@@ -8,12 +8,20 @@ import (
 type Config struct {
     ServerPort       string `mapstructure:"SERVER_PORT"`
     QueueCapacity    int    `mapstructure:"QUEUE_CAPACITY"`
+
     ElasticsearchURL string `mapstructure:"ELASTICSEARCH_URL"`
     IndexName        string `mapstructure:"INDEX_NAME"`
     BulkThreshold    int    `mapstructure:"BULK_THRESHOLD"`
-    FlushInterval    int    `mapstructure:"FLUSH_INTERVAL"`  // in seconds
-    MaxRetries       int    `mapstructure:"MAX_RETRIES"`     // for bulk requests
-    LogLevel         string `mapstructure:"LOG_LEVEL"`
+    FlushInterval    int    `mapstructure:"FLUSH_INTERVAL"`
+    MaxRetries       int    `mapstructure:"MAX_RETRIES"`
+    
+	// Redis config
+    RedisHost     string `mapstructure:"REDIS_HOST"`
+    RedisPort     string `mapstructure:"REDIS_PORT"`
+    RedisPassword string `mapstructure:"REDIS_PASSWORD"`
+    RedisDB       int    `mapstructure:"REDIS_DB"`
+	
+    LogLevel string `mapstructure:"LOG_LEVEL"`
 }
 
 func LoadConfig() (*Config, error) {
@@ -22,8 +30,14 @@ func LoadConfig() (*Config, error) {
     viper.SetDefault("ELASTICSEARCH_URL", "http://localhost:9200/_bulk")
     viper.SetDefault("INDEX_NAME", "search_engine_index")
     viper.SetDefault("BULK_THRESHOLD", 3)
-    viper.SetDefault("FLUSH_INTERVAL", 30) // 30 seconds
+    viper.SetDefault("FLUSH_INTERVAL", 30)
     viper.SetDefault("MAX_RETRIES", 3)
+
+    // Redis defaults
+    viper.SetDefault("REDIS_HOST", "localhost")
+    viper.SetDefault("REDIS_PORT", "6379")
+    viper.SetDefault("REDIS_PASSWORD", "") // no auth by default
+    viper.SetDefault("REDIS_DB", 0)
     viper.SetDefault("LOG_LEVEL", "info")
 
     viper.AutomaticEnv()
