@@ -9,7 +9,7 @@ import (
     // "golang.org/x/net/html"
 	"indexer/internal/pkg/deduplicator"
     "indexer/internal/pkg/models"
-
+	"indexer/internal/pkg/metrics"
 )
 
 // Defines the high-level interface for processing page data.
@@ -35,7 +35,7 @@ func NewProcessor(deduper deduper.Deduper) Processor {
 
 // Runs the data processing pipeline:
 // cleaning/normalization, deduplication, and enrichment.
-func (p *processor) Process(pageData *models.PageData, doc *models.Document) error {
+func (processor *processor) Process(pageData *models.PageData, doc *models.Document) error {
     // Clean & normalize
     if err := cleanAndNormalize(pageData, doc); err != nil {
         return err
@@ -43,17 +43,21 @@ func (p *processor) Process(pageData *models.PageData, doc *models.Document) err
 
     // Dedup check
     signature := deduper.GenerateSignature(pageData.VisibleText)
-    if p.deduper.IsDuplicate(signature) {
+    if processor.deduper.IsDuplicate(signature) {
         return errors.New("duplicate page detected")
     }
 
     // Enrich doc
-    if err := p.enricher.Enrich(pageData, doc); err != nil {
+    if err := processor.enricher.Enrich(pageData, doc); err != nil {
         return err
     }
 
     // Store signature
-    p.deduper.StoreSignature(signature)
+    processor.deduper.StoreSignature(signature)
+
+	// Increment metrics
+	metrics.PagesProcessed.Inc()
+
     return nil
 }
 

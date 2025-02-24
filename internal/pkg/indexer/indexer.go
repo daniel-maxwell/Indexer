@@ -4,15 +4,15 @@ import (
     "bytes"
     "context"
     "encoding/json"
-    "indexer/internal/pkg/logger"
-    "indexer/internal/pkg/models"
     "math/rand"
     "net/http"
     "strings"
     "sync"
     "time"
-
     "go.uber.org/zap"
+    "indexer/internal/pkg/logger"
+    "indexer/internal/pkg/models"
+    "indexer/internal/pkg/metrics"
 )
 
 // BulkIndexer buffers documents until threshold or flush interval is reached.
@@ -97,6 +97,8 @@ func (indexer *BulkIndexer) flush() {
     indexer.buffer = make([]*models.Document, 0, indexer.threshold)
     indexer.mutex.Unlock()
 
+    metrics.BulkFlushes.Inc()
+
     // Build NDJSON
     var ndjsonPayload bytes.Buffer
     for _, doc := range docsToIndex {
@@ -149,7 +151,9 @@ func (indexer *BulkIndexer) sendBulkRequest(payload []byte, attempt int) {
         // Retry if we haven't exceeded maxRetries
         if attempt < indexer.maxRetries {
             time.Sleep(backoffDuration(attempt))
-            indexer.sendBulkRequest(payload, attempt+1)
+            indexer.sendBulkRequest(payload, attempt + 1)
+        } else {
+            metrics.BulkFailures.Inc()
         }
         return
     }
@@ -163,6 +167,8 @@ func (indexer *BulkIndexer) sendBulkRequest(payload []byte, attempt int) {
         if attempt < indexer.maxRetries {
             time.Sleep(backoffDuration(attempt))
             indexer.sendBulkRequest(payload, attempt+1)
+        } else {
+            metrics.BulkFailures.Inc()
         }
     }
 }

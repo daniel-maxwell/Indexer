@@ -5,6 +5,7 @@ import (
     "indexer/internal/pkg/logger"
     "indexer/internal/pkg/models"
     "net/http"
+    "github.com/prometheus/client_golang/prometheus/promhttp"
     "go.uber.org/zap"
 )
 
@@ -27,9 +28,18 @@ func startIngestHTTP(admin *administrator, port string) {
         writer.Write([]byte("Page data enqueued"))
     })
 
-    logger.Log.Info("HTTP ingestion service listening", zap.String("address", ":"+port))
+    // /metrics endpoint for Prometheus
+    http.Handle("/metrics", promhttp.Handler())
 
-    if err := http.ListenAndServe(":"+port, nil); err != nil {
+    // /health endpoint
+    http.HandleFunc("/health", func(writer http.ResponseWriter, request *http.Request) {
+        writer.WriteHeader(http.StatusOK)
+        writer.Write([]byte("OK"))
+    })
+
+    logger.Log.Info("HTTP ingestion service listening", zap.String("address", ":" + port))
+
+    if err := http.ListenAndServe(":" + port, nil); err != nil {
         logger.Log.Fatal("Failed to start ingestion service", zap.Error(err))
     }
 }
