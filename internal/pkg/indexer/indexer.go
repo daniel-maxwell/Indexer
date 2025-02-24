@@ -6,61 +6,87 @@ import (
     "encoding/json"
     "indexer/internal/logger"
     "indexer/internal/pkg/models"
+    "math/rand"
     "net/http"
+    "strings"
     "sync"
+    "time"
+
     "go.uber.org/zap"
 )
 
-// Buffers documents until a threshold is reached or a flush interval elapses.
+// BulkIndexer buffers documents until threshold or flush interval is reached.
 type BulkIndexer struct {
-    mutex        sync.Mutex
-    buffer       []*models.Document
-    threshold    int
-    flushChannel chan struct{}
-    elasticURL string
-    indexName  string
+    mutex         sync.Mutex
+    buffer        []*models.Document
+    threshold     int
+    flushChannel  chan struct{}
+
+    elasticURL    string
+    indexName     string
+
+    // New fields
+    flushInterval time.Duration
+    maxRetries    int
+
+    // for stopping the flush goroutine
+    done chan struct{}
 }
 
-// Creates a new BulkIndexer.
-func NewBulkIndexer(threshold int, elasticURL, indexName string) *BulkIndexer {
+// NewBulkIndexer creates a new BulkIndexer.
+func NewBulkIndexer(threshold int, elasticURL, indexName string, flushIntervalSeconds, maxRetries int) *BulkIndexer {
     indexer := &BulkIndexer{
-        buffer:       make([]*models.Document, 0, threshold),
-        threshold:    threshold,
-        flushChannel: make(chan struct{}, 1),
-        elasticURL:   elasticURL,
-        indexName:    indexName,
+        buffer:         make([]*models.Document, 0, threshold),
+        threshold:      threshold,
+        flushChannel:   make(chan struct{}, 1),
+        elasticURL:     elasticURL,
+        indexName:      indexName,
+        flushInterval:  time.Duration(flushIntervalSeconds) * time.Second,
+        maxRetries:     maxRetries,
+        done:           make(chan struct{}),
     }
     go indexer.startFlushing()
     return indexer
 }
 
-// Runs in a goroutine and flushes when signaled.
+// startFlushing runs in a goroutine and triggers flush on signal or interval
 func (indexer *BulkIndexer) startFlushing() {
+    ticker := time.NewTicker(indexer.flushInterval)
+    defer ticker.Stop()
+
     for {
         select {
+        case <-indexer.done:
+            // Final flush before shutdown
+            logger.Log.Info("BulkIndexer received done signal, flushing before exit")
+            indexer.flush()
+            return
         case <-indexer.flushChannel:
+            indexer.flush()
+        case <-ticker.C:
             indexer.flush()
         }
     }
 }
 
-// Adds a doc to the buffer and signals flush if threshold is met.
+// AddDocumentToIndexerPayload adds a doc to the buffer and signals flush if threshold is met.
 func (indexer *BulkIndexer) AddDocumentToIndexerPayload(doc *models.Document) {
     indexer.mutex.Lock()
-    defer indexer.mutex.Unlock()
-
     indexer.buffer = append(indexer.buffer, doc)
+    count := len(indexer.buffer)
+    indexer.mutex.Unlock()
+
     // If threshold is reached, signal a flush
-    if len(indexer.buffer) >= indexer.threshold {
+    if count >= indexer.threshold {
         select {
-			case indexer.flushChannel <- struct{}{}:
-			default:
-				// flush already signaled
+        case indexer.flushChannel <- struct{}{}:
+        default:
+            // flush already signaled
         }
     }
 }
 
-// Builds NDJSON payload and sends it to Elasticsearch.
+// flush builds NDJSON payload and sends it to Elasticsearch.
 func (indexer *BulkIndexer) flush() {
     indexer.mutex.Lock()
     if len(indexer.buffer) == 0 {
@@ -74,11 +100,12 @@ func (indexer *BulkIndexer) flush() {
     // Build NDJSON
     var ndjsonPayload bytes.Buffer
     for _, doc := range docsToIndex {
-        // TODO: define doc IDs, e.g. from doc.URL
+        // Generate doc ID from URL or canonical URL
+        docID := generateDocID(doc.URL, doc.CanonicalURL)
         meta := map[string]map[string]string{
             "index": {
                 "_index": indexer.indexName,
-                // "_id": "custom-id-based-on-url-or-hash",
+                "_id":    docID,
             },
         }
         metaLine, err := json.Marshal(meta)
@@ -99,13 +126,16 @@ func (indexer *BulkIndexer) flush() {
     }
 
     logger.Log.Info("Flushing documents to Elasticsearch", zap.Int("count", len(docsToIndex)))
-
-    // Asynchronously send the payload
-    go indexer.sendBulkRequest(ndjsonPayload.Bytes())
+    go indexer.sendBulkRequest(ndjsonPayload.Bytes(), 0) // start with attempt #0
 }
 
-// Sends the bulk payload to Elasticsearch.
-func (indexer *BulkIndexer) sendBulkRequest(payload []byte) {
+// Stop gracefully stops the BulkIndexer (e.g., called during shutdown).
+func (indexer *BulkIndexer) Stop() {
+    close(indexer.done)
+}
+
+// sendBulkRequest tries to POST the NDJSON to Elasticsearch, with optional retries.
+func (indexer *BulkIndexer) sendBulkRequest(payload []byte, attempt int) {
     request, err := http.NewRequestWithContext(context.Background(), "POST", indexer.elasticURL, bytes.NewReader(payload))
     if err != nil {
         logger.Log.Error("Failed to create bulk request", zap.Error(err))
@@ -115,7 +145,12 @@ func (indexer *BulkIndexer) sendBulkRequest(payload []byte) {
 
     response, err := http.DefaultClient.Do(request)
     if err != nil {
-        logger.Log.Error("Bulk request failed", zap.Error(err))
+        logger.Log.Error("Bulk request failed", zap.Error(err), zap.Int("attempt", attempt))
+        // Retry if we haven't exceeded maxRetries
+        if attempt < indexer.maxRetries {
+            time.Sleep(backoffDuration(attempt))
+            indexer.sendBulkRequest(payload, attempt+1)
+        }
         return
     }
     defer response.Body.Close()
@@ -123,6 +158,42 @@ func (indexer *BulkIndexer) sendBulkRequest(payload []byte) {
     if response.StatusCode >= 200 && response.StatusCode < 300 {
         logger.Log.Info("Bulk indexing successful", zap.Int("status_code", response.StatusCode))
     } else {
-        logger.Log.Warn("Bulk indexing failed", zap.Int("status_code", response.StatusCode))
+        logger.Log.Warn("Bulk indexing failed", zap.Int("status_code", response.StatusCode), zap.Int("attempt", attempt))
+        // Retry on non-2xx if we haven't exceeded maxRetries
+        if attempt < indexer.maxRetries {
+            time.Sleep(backoffDuration(attempt))
+            indexer.sendBulkRequest(payload, attempt+1)
+        }
     }
+}
+
+// backoffDuration returns a simple exponential backoff time.
+func backoffDuration(attempt int) time.Duration {
+    base := time.Second
+    // Exponential backoff, plus a little jitter
+    backoff := time.Duration(1<<attempt) * base
+    jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
+    return backoff + jitter
+}
+
+// Returns a stable ID based on canonicalURL if available, else URL.
+// Additional hashing or slugification may be used for a consistent ID in future.
+func generateDocID(urlStr, canonicalStr string) string {
+    if strings.TrimSpace(canonicalStr) != "" {
+        return sanitizeID(canonicalStr)
+    }
+    return sanitizeID(urlStr)
+}
+
+// A simple placeholder that removes certain characters. 
+// Might refactor this to hash the URL or create a slug.
+func sanitizeID(raw string) string {
+    clean := strings.ReplaceAll(raw, "http://", "")
+    clean = strings.ReplaceAll(clean, "https://", "")
+    clean = strings.ReplaceAll(clean, "/", "_")
+    // Keep it short
+    if len(clean) > 100 {
+        clean = clean[:100]
+    }
+    return clean
 }

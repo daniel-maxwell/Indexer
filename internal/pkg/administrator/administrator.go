@@ -12,13 +12,15 @@ import (
     "time"
 )
 
-// Administrator interface remains the same
+// Administrator interface
 type Administrator interface {
     EnqueuePageData(ctx context.Context, data models.PageData) error
     ProcessAndIndex(ctx context.Context) error
-    StartService(port string) // updated signature to accept port
+    StartService(port string)
+    Stop()
 }
 
+// Implementation of the Administrator interface
 type administrator struct {
     indexer   *indexer.BulkIndexer
     queue     *queue.Queue
@@ -27,7 +29,6 @@ type administrator struct {
 
 // New creates a new instance of an Administrator with a config
 func New(cfg *config.Config) Administrator {
-    // Create/initialize the queue
     pageQueue, err := queue.CreateQueue(cfg.QueueCapacity)
     if err != nil {
         logger.Log.Fatal("Failed to create queue", zap.Error(err))
@@ -35,8 +36,14 @@ func New(cfg *config.Config) Administrator {
 
     deduper := processor.NewDeduper()
 
-    // Initialize the BulkIndexer with config
-    bulkIndexer := indexer.NewBulkIndexer(cfg.BulkThreshold, cfg.ElasticsearchURL, cfg.IndexName)
+    // Note the new arguments for flush interval and maxRetries
+    bulkIndexer := indexer.NewBulkIndexer(
+        cfg.BulkThreshold,
+        cfg.ElasticsearchURL,
+        cfg.IndexName,
+        cfg.FlushInterval,
+        cfg.MaxRetries,
+    )
 
     return &administrator{
         indexer:   bulkIndexer,
@@ -60,11 +67,9 @@ func (admin *administrator) ProcessAndIndex(ctx context.Context) error {
             default:
                 pageData, err := admin.queue.Remove()
                 if err != nil {
-                    // queue is empty, wait briefly
                     time.Sleep(200 * time.Millisecond)
                     continue
                 }
-
                 document := models.Document{}
                 err = admin.processor.Process(&pageData, &document)
                 if err != nil {
@@ -72,8 +77,6 @@ func (admin *administrator) ProcessAndIndex(ctx context.Context) error {
                 } else {
                     logger.Log.Debug("Processed page", zap.String("url", pageData.URL))
                 }
-
-                // Send the document to the indexer
                 admin.indexer.AddDocumentToIndexerPayload(&document)
             }
         }
@@ -86,4 +89,9 @@ func (admin *administrator) StartService(port string) {
     logger.Log.Info("Starting HTTP ingestion service", zap.String("port", port))
     // The code is in ingest_service.go, we pass the port in
     startIngestHTTP(admin, port)
+}
+
+// Stops the BulkIndexer gracefully
+func (admin *administrator) Stop() {
+    admin.indexer.Stop()
 }
