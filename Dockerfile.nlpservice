@@ -1,0 +1,24 @@
+FROM python:3.10-slim
+
+# Install system dependencies for spaCy
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy requirements if needed, e.g.:
+RUN python -m pip install --upgrade pip
+
+# Install dependencies
+RUN pip install flask==2.2.2 spacy==3.4.4 numpy==1.26.3 Werkzeug==2.3.7
+
+# Copy spaCy script
+COPY nlp-service/nlp_service.py /app/
+
+# Download model
+RUN python -m spacy download en
+
+EXPOSE 5000
+
+CMD ["python", "nlp_service.py"]

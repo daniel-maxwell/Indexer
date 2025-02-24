@@ -30,7 +30,7 @@ type Config struct {
 func LoadConfig() (*Config, error) {
     viper.SetDefault("SERVER_PORT", "8080")
     viper.SetDefault("QUEUE_CAPACITY", 1000)
-    viper.SetDefault("ELASTICSEARCH_URL", "http://localhost:9200/_bulk")
+    viper.SetDefault("ELASTICSEARCH_URL", "http://localhost:9200/_bulk") // Will point to a remote ES instance for production
     viper.SetDefault("INDEX_NAME", "search_engine_index")
     viper.SetDefault("BULK_THRESHOLD", 3)
     viper.SetDefault("FLUSH_INTERVAL", 30)

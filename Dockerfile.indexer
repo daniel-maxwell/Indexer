@@ -1,0 +1,41 @@
+FROM golang:1.24 AS builder
+
+WORKDIR /app
+
+# Copy go.mod and go.sum first to cache mod downloads
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy the rest of your source
+COPY . .
+
+# Build the Go binary
+RUN CGO_ENABLED=0 GOOS=linux go build -o /indexer ./cmd/app/main.go
+
+# Minimal image
+FROM alpine:3.17
+
+# ca-certificates for logging etc.
+RUN apk --no-cache add ca-certificates
+WORKDIR /app
+COPY --from=builder /indexer /app/indexer
+
+# Expose the ingestion port
+EXPOSE 8080
+
+# Provide defaults for environment variables
+ENV SERVER_PORT=8080 \
+    ELASTICSEARCH_URL=http://elasticsearch:9200/_bulk \
+    INDEX_NAME=search_engine_index \
+    BULK_THRESHOLD=5 \
+    FLUSH_INTERVAL=30 \
+    MAX_RETRIES=3 \
+    QUEUE_CAPACITY=1000 \
+    REDIS_HOST=redis \
+    REDIS_PORT=6379 \
+    REDIS_DB=0 \
+    NLP_SERVICE_URL=http://nlp:5000/nlp \
+    LOG_LEVEL=info
+
+# Run the Go service
+ENTRYPOINT ["/app/indexer"]

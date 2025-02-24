@@ -1,0 +1,60 @@
+version: "3.8"
+
+services:
+  indexer:
+    build:
+      context: .
+      dockerfile: Dockerfile.indexer
+    container_name: indexer
+    depends_on:
+      - nlp
+      - redis
+      # - elasticsearch
+    ports:
+      - "8080:8080"
+    environment:
+      SERVER_PORT: "8080"
+      ELASTICSEARCH_URL: "http://my-remote-es.domain.com:9200/_bulk" # Placeholder. Will point to remote ES instance.
+      INDEX_NAME: "search_engine_index"
+      BULK_THRESHOLD: "5"
+      FLUSH_INTERVAL: "30"
+      MAX_RETRIES: "3"
+      QUEUE_CAPACITY: "1000"
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+      REDIS_DB: "0"
+      NLP_SERVICE_URL: "http://nlp:5000/nlpservice"
+      LOG_LEVEL: "info"
+
+  nlp:
+    build:
+      context: .
+      dockerfile: Dockerfile.nlpservice
+    container_name: nlp-service
+    ports:
+      - "5000:5000"
+
+  redis:
+    image: "redis:7.0.11"
+    container_name: redis
+    volumes:
+      - redisdata:/data
+    ports:
+      - "6379:6379"
+
+#  elasticsearch:
+#    image: docker.elastic.co/elasticsearch/elasticsearch:8.5.3
+#    container_name: elasticsearch
+#    environment:
+#      - discovery.type=single-node
+#      - xpack.security.enabled=false
+#      - xpack.security.audit.enabled=false
+#      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+#    ports:
+#      - "9200:9200"
+#    volumes:
+#      - esdata:/usr/share/elasticsearch/data
+
+volumes:
+  redisdata:
+  # esdata:
