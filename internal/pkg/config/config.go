@@ -20,6 +20,9 @@ type Config struct {
     RedisPort     string `mapstructure:"REDIS_PORT"`
     RedisPassword string `mapstructure:"REDIS_PASSWORD"`
     RedisDB       int    `mapstructure:"REDIS_DB"`
+
+    // NLP service config
+    NlpServiceURL string `mapstructure:"NLP_SERVICE_URL"`
 	
     LogLevel string `mapstructure:"LOG_LEVEL"`
 }
@@ -39,6 +42,9 @@ func LoadConfig() (*Config, error) {
     viper.SetDefault("REDIS_PASSWORD", "") // no auth by default
     viper.SetDefault("REDIS_DB", 0)
     viper.SetDefault("LOG_LEVEL", "info")
+
+    // NLP service defaults
+    viper.SetDefault("NLP_SERVICE_URL", "http://localhost:5000/nlp")
 
     viper.AutomaticEnv()
 

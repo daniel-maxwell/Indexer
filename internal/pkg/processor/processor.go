@@ -26,10 +26,10 @@ type processor struct {
 }
 
 // Creates a new Processor instance and wires in the sub‑components.
-func NewProcessor(deduper deduper.Deduper) Processor {
+func NewProcessor(deduper deduper.Deduper, nlpServiceURL string) Processor {
     return &processor{
         deduper:  deduper,
-        enricher: NewNLPEnricher(),
+        enricher: NewNLPEnricher(nlpServiceURL),
     }
 }
 

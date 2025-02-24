@@ -1,54 +1,94 @@
 package processor
 
 import (
+	"bytes"
+    "encoding/json"
+    "fmt"
+    "net/http"
+    "time"
+    "go.uber.org/zap"
 	"indexer/internal/pkg/models"
+    "indexer/internal/pkg/logger"
 )
 
 // Enricher defines the interface for adding additional metadata to a document.
 type Enricher interface {
-	Enrich(pd *models.PageData, doc *models.Document) error
+	Enrich(pageData *models.PageData, doc *models.Document) error
 }
 
 // nlpEnricher is a naive implementation of Enricher.
-type nlpEnricher struct{}
+type nlpEnricher struct{
+	nlpServiceURL string
+}
 
 // NewNLPEnricher creates a new instance of an NLP-based Enricher.
-func NewNLPEnricher() Enricher {
-	return &nlpEnricher{}
+func NewNLPEnricher(nlpServiceURL string) Enricher {
+	return &nlpEnricher{
+        nlpServiceURL: nlpServiceURL,
+    }
 }
 
 // Enrich augments the document with entities, keywords, and a summary.
-func (e *nlpEnricher) Enrich(pd *models.PageData, doc *models.Document) error {
-	// Extract entities.
-	doc.Entities = extractEntities(pd.VisibleText)
-	// Extract keywords.
-	doc.Keywords = extractKeywords(pd.VisibleText)
-	// Generate summary.
-	doc.Summary = summarize(pd.VisibleText)
-	return nil
-}
+func (enricher *nlpEnricher) Enrich(pageData *models.PageData, doc *models.Document) error {
+    // Send pageData.VisibleText to the Python microservice
+    if pageData.VisibleText == "" {
+        // no text, skip
+        return nil
+    }
 
-// extractEntities extracts entities from text (placeholder implementation).
-func extractEntities(text string) []string {
-	return []string{"entity1", "entity2"}
-}
+    payload := map[string]string{"text": pageData.VisibleText}
+    jsonBody, err := json.Marshal(payload)
+    if err != nil {
+        return fmt.Errorf("failed to marshal JSON for NLP request: %w", err)
+    }
 
-// extractKeywords extracts keywords from text (placeholder implementation).
-func extractKeywords(text string) []string {
-	return []string{"keyword1", "keyword2"}
-}
+    request, err := http.NewRequest("POST", enricher.nlpServiceURL, bytes.NewBuffer(jsonBody))
+    if err != nil {
+        return fmt.Errorf("failed to create request for NLP service: %w", err)
+    }
+    request.Header.Set("Content-Type", "application/json")
 
-// summarize generates a summary from text (placeholder implementation).
-func summarize(text string) string {
-	return "Placeholder summary"
-}
+    client := &http.Client{Timeout: 5 * time.Second}
+    response, err := client.Do(request)
+    if err != nil {
+        logger.Log.Warn("NLP service call failed", zap.Error(err))
+        // Optionally skip or fallback
+        return nil
+    }
+    defer response.Body.Close()
 
-// tokenize splits text into tokens (unused, placeholder).
-func tokenize(text string) []string {
-	return []string{"token1", "token2"}
-}
+    if response.StatusCode != http.StatusOK {
+        logger.Log.Warn("NLP service returned non-200", zap.Int("status", response.StatusCode))
+        return nil
+    }
 
-// splitIntoSentences splits text into sentences (unused, placeholder).
-func splitIntoSentences(text string) []string {
-	return []string{"Sentence 1", "Sentence 2"}
+    var result struct {
+        Entities []struct {
+            Text  string `json:"text"`
+            Label string `json:"label"`
+        } `json:"entities"`
+        Keywords []string `json:"keywords"`
+        Summary  string   `json:"summary"`
+    }
+
+    if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+        logger.Log.Warn("Failed to decode NLP service response", zap.Error(err))
+        return nil
+    }
+
+    // Map entities to doc.Entities
+    var entities []string
+    for _, ent := range result.Entities {
+        // e.g. "PERSON: John" or "ORG: Google"
+        entities = append(entities, fmt.Sprintf("%s: %s", ent.Label, ent.Text))
+    }
+    doc.Entities = entities
+
+    // Store keywords
+    doc.Keywords = result.Keywords
+
+    // Store summary
+    doc.Summary = result.Summary
+
+    return nil
 }

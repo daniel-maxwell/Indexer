@@ -2,16 +2,16 @@ package administrator
 
 import (
 	"context"
-	"indexer/internal/pkg/config"
+	"log"
+	"time"
+	"go.uber.org/zap"
+    "indexer/internal/pkg/config"
 	"indexer/internal/pkg/logger"
 	"indexer/internal/pkg/deduplicator"
 	"indexer/internal/pkg/indexer"
 	"indexer/internal/pkg/models"
 	"indexer/internal/pkg/processor"
 	"indexer/internal/pkg/queue"
-	"log"
-	"time"
-	"go.uber.org/zap"
 )
 
 // Administrator interface
@@ -29,31 +29,31 @@ type administrator struct {
     processor processor.Processor
 }
 
-// New creates a new instance of an Administrator with a config
-func New(cfg *config.Config) Administrator {
-    pageQueue, err := queue.CreateQueue(cfg.QueueCapacity)
+// Creates a new instance of an Administrator with a config
+func New(config *config.Config) Administrator {
+    pageQueue, err := queue.CreateQueue(config.QueueCapacity)
     if err != nil {
         logger.Log.Fatal("Failed to create queue", zap.Error(err))
     }
 
     // Requires a redis instance. docker run -p 6379:6379 --name redis -d redis:6.2
-    deduper, err := deduper.NewRedisDeduper(cfg)
+    deduper, err := deduper.NewRedisDeduper(config)
     if err != nil {
         log.Fatalf("Failed to create deduper: %v", err)
     }
 
     bulkIndexer := indexer.NewBulkIndexer(
-        cfg.BulkThreshold,
-        cfg.ElasticsearchURL,
-        cfg.IndexName,
-        cfg.FlushInterval,
-        cfg.MaxRetries,
+        config.BulkThreshold,
+        config.ElasticsearchURL,
+        config.IndexName,
+        config.FlushInterval,
+        config.MaxRetries,
     )
 
     return &administrator{
         indexer:   bulkIndexer,
         queue:     pageQueue,
-        processor: processor.NewProcessor(deduper),
+        processor: processor.NewProcessor(deduper, config.NlpServiceURL),
     }
 }
 
