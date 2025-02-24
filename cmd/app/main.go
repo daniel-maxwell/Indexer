@@ -6,11 +6,16 @@ import (
     "os/signal"
     "syscall"
     "time"
-    "indexer/internal/config"
-    "indexer/internal/logger"
+    "indexer/internal/pkg/config"
+    "indexer/internal/pkg/logger"
     "indexer/internal/pkg/administrator"
     "go.uber.org/zap"
 )
+
+/**
+This application requires a Redis instance to be running.
+To start a Redis instance with Docker, run: docker run -p 6379:6379 --name redis -d redis:6.2
+*/
 
 func main() {
     config, err := config.LoadConfig()

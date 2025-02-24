@@ -2,7 +2,7 @@ package administrator
 
 import (
     "encoding/gob"
-    "indexer/internal/logger"
+    "indexer/internal/pkg/logger"
     "indexer/internal/pkg/models"
     "net/http"
     "go.uber.org/zap"

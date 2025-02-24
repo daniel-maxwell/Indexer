@@ -2,8 +2,8 @@ package administrator
 
 import (
 	"context"
-	"indexer/internal/config"
-	"indexer/internal/logger"
+	"indexer/internal/pkg/config"
+	"indexer/internal/pkg/logger"
 	"indexer/internal/pkg/deduplicator"
 	"indexer/internal/pkg/indexer"
 	"indexer/internal/pkg/models"

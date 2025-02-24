@@ -4,7 +4,7 @@ import (
     "bytes"
     "context"
     "encoding/json"
-    "indexer/internal/logger"
+    "indexer/internal/pkg/logger"
     "indexer/internal/pkg/models"
     "math/rand"
     "net/http"

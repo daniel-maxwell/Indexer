@@ -8,8 +8,8 @@ import (
     "strings"
     "time"
     "sync"
-    "indexer/internal/config"
-    "indexer/internal/logger"
+    "indexer/internal/pkg/config"
+    "indexer/internal/pkg/logger"
     "github.com/redis/go-redis/v9"
     "go.uber.org/zap"
 )
