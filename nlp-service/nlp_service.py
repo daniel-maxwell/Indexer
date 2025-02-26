@@ -1,19 +1,42 @@
-#!/usr/bin/env python3
+import os
 import spacy
+import torch
+from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
 from flask import Flask, request, jsonify
+from sentence_transformers import SentenceTransformer
 
 app = Flask(__name__)
 
-# Load spaCy model
-nlp = spacy.load("en_core_web_sm")
+# Load spaCy (transformer-based) - may change for deployment
+spacy_model = spacy.load("en_core_web_trf")  # or "en_core_web_sm"
+
+# Huggingface summarizer
+summarizer = pipeline(
+    "summarization",
+    model="facebook/bart-large-cnn",
+    tokenizer="facebook/bart-large-cnn",
+    framework="pt",  # "tf" if using TensorFlow
+    device=0 if torch.cuda.is_available() else -1
+)
+
+# Sentence Transformer for embeddings
+embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 @app.route("/nlp", methods=["POST"])
 def nlp_process():
     data = request.get_json()
     text = data.get("text", "")
-    doc = nlp(text)
+    if not text.strip():
+        return jsonify({
+            "entities": [],
+            "keywords": [],
+            "summary": "",
+            "embedding": []
+        })
 
-    # Extract named entities
+    doc = spacy_model(text)
+
+    # Named entities (spacy-based)
     entities = []
     for ent in doc.ents:
         entities.append({
@@ -21,18 +44,30 @@ def nlp_process():
             "label": ent.label_
         })
 
-    # Will flesh this out further in the future. For now, pick nouns as a naive approach.
-    keywords = [token.text for token in doc if token.pos_ == "NOUN"]
+    # Simple keyword extraction with noun chunks
+    # For something more advanced: PyTextRank, RAKE, or custom pipeline
+    keywords = list(set(chunk.text for chunk in doc.noun_chunks if chunk.text.strip()))
 
-    # Will flesh this out further in the future. For now, just return the first sentence.
-    summary = ""
-    if len(list(doc.sents)) > 0:
-        summary = list(doc.sents)[0].text
+    # Summarization with huggingface
+    # We might chunk the text if it's very long
+    MAX_LEN = 1024  # bart-large-cnn often limited to 1024 tokens
+    # If text is too long, we truncate or chunk
+    if len(text.split()) > 1500:
+        # chunk or reduce
+        text = " ".join(text.split()[:1500])
+
+    summary_result = summarizer(text, max_length=100, min_length=30, do_sample=False)
+    summary_text = summary_result[0]["summary_text"] if summary_result else ""
+
+
+    # Embeddings
+    embedding = embedding_model.encode(text, show_progress_bar=False).tolist()
 
     return jsonify({
         "entities": entities,
         "keywords": keywords,
-        "summary": summary
+        "summary": summary_text,
+        "embedding": embedding
     })
 
 if __name__ == "__main__":

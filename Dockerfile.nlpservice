@@ -7,17 +7,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy requirements if needed, e.g.:
+# Upgrade pip
 RUN python -m pip install --upgrade pip
 
-# Install dependencies
-RUN pip install flask==2.2.2 spacy==3.4.4 numpy==1.26.3 Werkzeug==2.3.7
-
-# Copy spaCy script
-COPY nlp-service/nlp_service.py /app/
+COPY nlp-service/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Download model
 RUN python -m spacy download en
+RUN python -m spacy download en_core_web_trf
+RUN python -m spacy download en_core_web_sm
+
+# Copy spaCy script
+COPY nlp-service/nlp_service.py /app/
 
 EXPOSE 5000
 
