@@ -4,19 +4,22 @@ import torch
 from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
 from flask import Flask, request, jsonify
 from sentence_transformers import SentenceTransformer
+from keybert import KeyBERT
 
 app = Flask(__name__)
 
 # Load spaCy (transformer-based) - may change for deployment
 spacy_model = spacy.load("en_core_web_trf")  # or "en_core_web_sm"
 
+kw_model = KeyBERT()
+
 # Huggingface summarizer
 summarizer = pipeline(
     "summarization",
-    model="facebook/bart-large-cnn",
-    tokenizer="facebook/bart-large-cnn",
-    framework="pt",  # "tf" if using TensorFlow
-    device=0 if torch.cuda.is_available() else -1
+    model = "facebook/bart-large-cnn",
+    tokenizer = "facebook/bart-large-cnn",
+    framework = "pt",  # "tf" if using TensorFlow
+    device = 0 if torch.cuda.is_available() else -1
 )
 
 # Sentence Transformer for embeddings
@@ -29,7 +32,7 @@ def nlp_process():
     if not text.strip():
         return jsonify({
             "entities": [],
-            "keywords": [],
+            "keyphrases": [],
             "summary": "",
             "embedding": []
         })
@@ -44,9 +47,9 @@ def nlp_process():
             "label": ent.label_
         })
 
-    # Simple keyword extraction with noun chunks
-    # For something more advanced: PyTextRank, RAKE, or custom pipeline
-    keywords = list(set(chunk.text for chunk in doc.noun_chunks if chunk.text.strip()))
+    
+    keywords = [x[0] for x in kw_model.extract_keywords(text, keyphrase_ngram_range=(1, 3), use_mmr=True, diversity=0.5)]
+
 
     # Summarization with huggingface
     # We might chunk the text if it's very long
@@ -65,7 +68,7 @@ def nlp_process():
 
     return jsonify({
         "entities": entities,
-        "keywords": keywords,
+        "keyphrases": keywords,
         "summary": summary_text,
         "embedding": embedding
     })
