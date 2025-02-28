@@ -7,7 +7,6 @@ import (
     "fmt"
     "strings"
     "time"
-    "sync"
     "indexer/internal/pkg/config"
     "indexer/internal/pkg/logger"
     "github.com/redis/go-redis/v9"
@@ -19,16 +18,6 @@ type Deduper interface {
 	IsDuplicate(signature string) bool
 	StoreSignature(signature string)
 }
-
-// A naive in-memory implementation of Deduper.
-type memoryDeduper struct {
-	mu         sync.RWMutex
-	signatures map[string]struct{}
-}
-
-
-
-
 
 // Implements the Deduper interface with Redis as the backing store.
 type redisDeduper struct {

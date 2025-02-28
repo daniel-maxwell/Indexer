@@ -11,24 +11,24 @@ import (
     "indexer/internal/pkg/logger"
 )
 
-// Enricher defines the interface for adding additional metadata to a document.
+// Defines the interface for adding additional metadata to a document.
 type Enricher interface {
 	Enrich(pageData *models.PageData, doc *models.Document) error
 }
 
-// nlpEnricher is a naive implementation of Enricher.
+// Implementation of Enricher.
 type nlpEnricher struct{
 	nlpServiceURL string
 }
 
-// NewNLPEnricher creates a new instance of an NLP-based Enricher.
+// Creates a new instance of an NLP-based Enricher.
 func NewNLPEnricher(nlpServiceURL string) Enricher {
 	return &nlpEnricher{
         nlpServiceURL: nlpServiceURL,
     }
 }
 
-// Enrich augments the document with entities, keywords, and a summary.
+// Augments the document with entities, keywords, and a summary.
 func (enricher *nlpEnricher) Enrich(pageData *models.PageData, doc *models.Document) error {
     // Send pageData.VisibleText to the Python microservice
     if pageData.VisibleText == "" {
@@ -67,8 +67,8 @@ func (enricher *nlpEnricher) Enrich(pageData *models.PageData, doc *models.Docum
             Text  string `json:"text"`
             Label string `json:"label"`
         } `json:"entities"`
-        Keywords []string `json:"keywords"`
-        Summary  string   `json:"summary"`
+        Keyphrases []string `json:"keyphrases"`
+        Summary    string   `json:"summary"`
     }
 
     if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
@@ -85,7 +85,7 @@ func (enricher *nlpEnricher) Enrich(pageData *models.PageData, doc *models.Docum
     doc.Entities = entities
 
     // Store keywords
-    doc.Keywords = result.Keywords
+    doc.Keywords = result.Keyphrases
 
     // Store summary
     doc.Summary = result.Summary
