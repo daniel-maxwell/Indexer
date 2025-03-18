@@ -9,17 +9,17 @@ services:
     depends_on:
       - nlp
       - redis
-      # - elasticsearch
     ports:
       - "8080:8080"
     environment:
       SERVER_PORT: "8080"
-      ELASTICSEARCH_URL: "http://my-remote-es.domain.com:9200/_bulk" # Placeholder. Will point to remote ES instance.
+      ELASTICSEARCH_URL: "http://my-remote-es.domain.com:9200/_bulk"
       INDEX_NAME: "search_engine_index"
       BULK_THRESHOLD: "5"
       FLUSH_INTERVAL: "30"
       MAX_RETRIES: "3"
       QUEUE_CAPACITY: "1000"
+      NUM_WORKERS: "10"
       REDIS_HOST: "redis"
       REDIS_PORT: "6379"
       REDIS_DB: "0"

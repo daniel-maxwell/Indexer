@@ -1,14 +1,18 @@
 package administrator
 
 import (
+    "time"
+    "encoding/json"
     "encoding/gob"
-    "indexer/internal/pkg/logger"
-    "indexer/internal/pkg/models"
     "net/http"
     "github.com/prometheus/client_golang/prometheus/promhttp"
     "go.uber.org/zap"
+    "indexer/internal/pkg/logger"
+    "indexer/internal/pkg/models"
 )
 
+// Starts the HTTP ingestion service. This is a simple HTTP server that 
+// listens for incoming page data and provides a /health endpoint for monitoring.
 func startIngestHTTP(admin *administrator, port string) {
     http.HandleFunc("/index", func(writer http.ResponseWriter, request *http.Request) {
         var pageData models.PageData
@@ -33,8 +37,22 @@ func startIngestHTTP(admin *administrator, port string) {
 
     // /health endpoint
     http.HandleFunc("/health", func(writer http.ResponseWriter, request *http.Request) {
-        writer.WriteHeader(http.StatusOK)
-        writer.Write([]byte("OK"))
+        health := struct {
+            Status     string    `json:"status"`
+            QueueDepth int       `json:"queue_depth"`
+            Workers    int       `json:"workers"`
+            Uptime     string    `json:"uptime"`
+            StartTime  time.Time `json:"start_time"`
+        }{
+            Status:     "OK",
+            QueueDepth: admin.QueueDepth(),
+            Workers:    admin.WorkerCount(),
+            Uptime:     time.Since(admin.StartTime()).String(),
+            StartTime:  admin.StartTime(),
+        }
+
+        writer.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(writer).Encode(health)
     })
 
     logger.Log.Info("HTTP ingestion service listening", zap.String("address", ":" + port))

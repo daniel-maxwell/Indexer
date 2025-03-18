@@ -6,7 +6,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy the rest of your source
+# Copy the rest of the source
 COPY . .
 
 # Build the Go binary
@@ -23,7 +23,7 @@ COPY --from=builder /indexer /app/indexer
 # Expose the ingestion port
 EXPOSE 8080
 
-# Provide defaults for environment variables
+# Set defaults for environment variables
 ENV SERVER_PORT=8080 \
     ELASTICSEARCH_URL=http://elasticsearch:9200/_bulk \
     INDEX_NAME=search_engine_index \
@@ -31,6 +31,7 @@ ENV SERVER_PORT=8080 \
     FLUSH_INTERVAL=30 \
     MAX_RETRIES=3 \
     QUEUE_CAPACITY=1000 \
+    NUM_WORKERS=4 \
     REDIS_HOST=redis \
     REDIS_PORT=6379 \
     REDIS_DB=0 \
