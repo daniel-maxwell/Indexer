@@ -34,3 +34,30 @@ var BulkFailures = promauto.NewCounter(prometheus.CounterOpts{
     Name: "indexer_bulk_failures_total",
     Help: "Total number of bulk requests that failed",
 })
+
+// NLP service metrics
+var (    
+    NlpRequests = promauto.NewCounter(prometheus.CounterOpts{
+        Name: "indexer_nlp_requests_total",
+        Help: "Total number of requests sent to the NLP service",
+    })
+    
+    NlpErrors = promauto.NewCounter(prometheus.CounterOpts{
+        Name: "indexer_nlp_errors_total",
+        Help: "Total number of failed requests to the NLP service",
+    })
+    
+    NlpLatency = promauto.NewHistogram(prometheus.HistogramOpts{
+        Name: "indexer_nlp_latency_seconds",
+        Help: "Time taken to process NLP requests",
+        Buckets: prometheus.ExponentialBuckets(0.1, 2, 10), // From 100ms to ~100s
+    })
+    
+    CircuitBreakerState = promauto.NewGaugeVec(
+        prometheus.GaugeOpts{
+            Name: "indexer_circuit_breaker_state",
+            Help: "Current state of circuit breakers (0=closed, 1=half-open, 2=open)",
+        },
+        []string{"service"},
+    )
+)
