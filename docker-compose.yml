@@ -24,6 +24,8 @@ services:
       REDIS_PORT: "6379"
       REDIS_DB: "0"
       NLP_SERVICE_URL: "http://nlp:5000/nlpservice"
+      NLP_BATCH_SIZE: "10"
+      NLP_BATCH_TIMEOUT_MS: "200"
       LOG_LEVEL: "info"
 
   nlp:
@@ -33,6 +35,9 @@ services:
     container_name: nlp-service
     ports:
       - "5000:5000"
+    environment:
+      MAX_BATCH_SIZE: "20"
+      SPACY_MODEL: "en_core_web_sm"
 
   redis:
     image: "redis:7.0.11"

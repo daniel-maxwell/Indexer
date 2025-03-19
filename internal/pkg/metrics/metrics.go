@@ -36,7 +36,7 @@ var BulkFailures = promauto.NewCounter(prometheus.CounterOpts{
 })
 
 // NLP service metrics
-var (    
+var (
     NlpRequests = promauto.NewCounter(prometheus.CounterOpts{
         Name: "indexer_nlp_requests_total",
         Help: "Total number of requests sent to the NLP service",
@@ -51,6 +51,17 @@ var (
         Name: "indexer_nlp_latency_seconds",
         Help: "Time taken to process NLP requests",
         Buckets: prometheus.ExponentialBuckets(0.1, 2, 10), // From 100ms to ~100s
+    })
+    
+    NlpBatchCount = promauto.NewCounter(prometheus.CounterOpts{
+        Name: "indexer_nlp_batch_count_total",
+        Help: "Total number of batches sent to the NLP service",
+    })
+    
+    NlpBatchSize = promauto.NewHistogram(prometheus.HistogramOpts{
+        Name: "indexer_nlp_batch_size",
+        Help: "Size of batches sent to the NLP service",
+        Buckets: []float64{1, 2, 5, 10, 20, 50, 100},
     })
     
     CircuitBreakerState = promauto.NewGaugeVec(

@@ -1,122 +1,92 @@
 package processor
 
 import (
-	"bytes"
-    "encoding/json"
-    "fmt"
-    "net/http"
-    "time"
-    "errors"
-    "sync"
     "context"
-    "golang.org/x/time/rate"
+    "fmt"
+    "time"
     "go.uber.org/zap"
-	"indexer/internal/pkg/models"
     "indexer/internal/pkg/logger"
-    "indexer/internal/pkg/circuitbreaker"
+    "indexer/internal/pkg/metrics"
+    "indexer/internal/pkg/models"
 )
 
 // Defines the interface for adding additional metadata to a document.
 type Enricher interface {
-	Enrich(pageData *models.PageData, doc *models.Document) error
+    Enrich(pageData *models.PageData, doc *models.Document) error
 }
 
 // Implementation of Enricher.
 type nlpEnricher struct {
-    nlpServiceURL  string
-    circuitBreaker *circuitbreaker.CircuitBreaker
-    rateLimiter    *rate.Limiter
-    limiterMu      sync.Mutex
+    batchProcessor *BatchProcessor
 }
 
 // Creates a new instance of an NLP-based Enricher.
 func NewNLPEnricher(nlpServiceURL string) Enricher {
+    // Default batch settings for now
+    batchSize := 10  // Process 10 documents at a time
+    batchTimeout := 200 * time.Millisecond
     return &nlpEnricher{
-        nlpServiceURL:  nlpServiceURL,
-        circuitBreaker: circuitbreaker.NewCircuitBreaker("nlp-service", 5, 30*time.Second),
-        // Creates a rate limiter that allows 20 requests per second with a burst of 30
-        // These numbers should be tuned based on NLP service capacity
-        rateLimiter:    rate.NewLimiter(rate.Limit(20), 30),
+        batchProcessor: NewBatchProcessor(nlpServiceURL, batchSize, batchTimeout),
     }
 }
 
-// Augments the document with entities, keywords, and a summary.
+// Augments the document with entities and keywords using batch processing.
 func (enricher *nlpEnricher) Enrich(pageData *models.PageData, doc *models.Document) error {
+    // Skip if no text
     if pageData.VisibleText == "" {
         return nil
     }
-
-    // Rate limit before making request
-    enricher.limiterMu.Lock()
-    if err := enricher.rateLimiter.Wait(context.Background()); err != nil {
-        enricher.limiterMu.Unlock()
-        logger.Log.Warn("Rate limit wait error", zap.Error(err))
-        return nil
-    }
-    enricher.limiterMu.Unlock()
     
-    payload := map[string]string{"text": pageData.VisibleText}
-    jsonBody, err := json.Marshal(payload)
+    // Create context with timeout for processing
+    ctx, cancel := context.WithTimeout(context.Background(), 10 * time.Second)
+    defer cancel()
+    
+    // Record timing for metrics
+    startTime := time.Now()
+    
+    // Process through batch processor
+    entities, keyphrases, err := enricher.batchProcessor.Process(ctx, pageData.VisibleText)
+    
+    // Update metrics
+    metrics.NlpRequests.Inc()
+    metrics.NlpLatency.Observe(time.Since(startTime).Seconds())
+    
     if err != nil {
-        return fmt.Errorf("failed to marshal JSON for NLP request: %w", err)
-    }
-    
-    var result struct {
-        Entities []struct {
-            Text  string `json:"text"`
-            Label string `json:"label"`
-        } `json:"entities"`
-        Keyphrases []string `json:"keyphrases"`
-        Summary    string   `json:"summary"`
-    }
-    
-    // Use circuit breaker to execute request with retries
-    err = enricher.circuitBreaker.Execute(func() error {
-        request, err := http.NewRequest("POST", enricher.nlpServiceURL, bytes.NewBuffer(jsonBody))
-        if err != nil {
-            return fmt.Errorf("failed to create request: %w", err)
-        }
-        request.Header.Set("Content-Type", "application/json")
-        
-        // Timeout to accommodate potential NLP service load
-        client := &http.Client{Timeout: 10 * time.Second}
-        response, err := client.Do(request)
-        if err != nil {
-            return fmt.Errorf("NLP service call failed: %w", err)
-        }
-        defer response.Body.Close()
-        
-        if response.StatusCode != http.StatusOK {
-            return fmt.Errorf("NLP service returned status %d", response.StatusCode)
-        }
-        
-        if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
-            return fmt.Errorf("failed to decode response: %w", err)
-        }
-        
-        return nil
-    })
-    
-    // If circuit is open, just return and continue without NLP enrichment
-    if errors.Is(err, circuitbreaker.ErrCircuitOpen) {
-        logger.Log.Warn("Skipping NLP enrichment, circuit breaker open")
+        logger.Log.Warn("NLP enrichment failed", zap.Error(err), zap.String("url", pageData.URL))
+        metrics.NlpErrors.Inc()
+        // Continue without NLP enrichment
         return nil
     }
     
-    // For other errors, log but continue
-    if err != nil {
-        logger.Log.Warn("NLP enrichment failed", zap.Error(err))
-        return nil
+    // Map entities to doc.Entities
+    var docEntities []string
+    for _, ent := range entities {
+        docEntities = append(docEntities, fmt.Sprintf("%s: %s", ent.Label, ent.Text))
+    }
+    doc.Entities = docEntities
+    
+    // Store keywords
+    doc.Keywords = keyphrases
+    
+    // Copy basic fields from PageData to Document
+    doc.URL = pageData.URL
+    doc.CanonicalURL = pageData.CanonicalURL
+    doc.Title = pageData.Title
+    doc.MetaDescription = pageData.MetaDescription
+    doc.VisibleText = pageData.VisibleText
+    doc.InternalLinks = pageData.InternalLinks
+    doc.ExternalLinks = pageData.ExternalLinks
+    doc.DatePublished = pageData.DatePublished
+    doc.DateModified = pageData.DateModified
+    doc.SocialLinks = pageData.SocialLinks
+    doc.IsSecure = pageData.IsSecure
+    
+    if pageData.LoadTime > 0 {
+        doc.LoadTime = int64(pageData.LoadTime / time.Millisecond)
     }
     
-    // Process results and update document
-    var entities []string
-    for _, ent := range result.Entities {
-        entities = append(entities, fmt.Sprintf("%s: %s", ent.Label, ent.Text))
-    }
-    doc.Entities = entities
-    doc.Keywords = result.Keyphrases
-    doc.Summary = result.Summary
+    // Set last crawled time
+    doc.LastCrawled = time.Now()
     
     return nil
 }

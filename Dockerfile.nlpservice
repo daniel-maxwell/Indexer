@@ -13,7 +13,7 @@ RUN python -m pip install --upgrade pip
 COPY nlp-service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Download model
+# Download models
 RUN python -m spacy download en
 RUN python -m spacy download en_core_web_trf
 RUN python -m spacy download en_core_web_sm
@@ -22,5 +22,10 @@ RUN python -m spacy download en_core_web_sm
 COPY nlp-service/nlp_service.py /app/
 
 EXPOSE 5000
+
+# Set environment variables with reasonable defaults for batching
+ENV SPACY_MODEL=en_core_web_sm \
+    MAX_BATCH_SIZE=20 \
+    MAX_TEXT_LENGTH=1500
 
 CMD ["python", "nlp_service.py"]

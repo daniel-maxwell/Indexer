@@ -19,7 +19,6 @@ type Document struct {
 	Title            string         `json:"title"`
 	MetaDescription  string         `json:"meta_description"`
 	VisibleText      string         `json:"visible_text"`
-	Summary          string         `json:"summary"`
 	Entities         []string       `json:"entities"`
 	Keywords         []string       `json:"keywords"`
 	InternalLinks    []string       `json:"internal_links"`

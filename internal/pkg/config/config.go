@@ -24,7 +24,9 @@ type Config struct {
     RedisDB       int    `mapstructure:"REDIS_DB"`
 
     // NLP service config
-    NlpServiceURL string `mapstructure:"NLP_SERVICE_URL"`
+    NlpServiceURL     string `mapstructure:"NLP_SERVICE_URL"`
+    NlpBatchSize      int    `mapstructure:"NLP_BATCH_SIZE"`
+    NlpBatchTimeoutMs int   `mapstructure:"NLP_BATCH_TIMEOUT_MS"`
     
     LogLevel string `mapstructure:"LOG_LEVEL"`
 }
@@ -49,6 +51,8 @@ func LoadConfig() (*Config, error) {
 
     // NLP service defaults
     viper.SetDefault("NLP_SERVICE_URL", "http://localhost:5000/nlp")
+    viper.SetDefault("NLP_BATCH_SIZE", 10)
+    viper.SetDefault("NLP_BATCH_TIMEOUT_MS", 200)
 
     viper.AutomaticEnv()
 
