@@ -84,9 +84,58 @@ func (enricher *nlpEnricher) Enrich(pageData *models.PageData, doc *models.Docum
     if pageData.LoadTime > 0 {
         doc.LoadTime = int64(pageData.LoadTime / time.Millisecond)
     }
+
+    doc.QualityScore = enricher.calculateQualityScore(doc)
     
     // Set last crawled time
     doc.LastCrawled = time.Now()
     
     return nil
+}
+
+// Quality scoring for prioritization
+func (enricher *nlpEnricher) calculateQualityScore(doc *models.Document) int {
+    score := 0
+    
+    // Text quality factors
+    if len(doc.VisibleText) > 100 {
+        score += 10
+    }
+    if len(doc.Title) > 5 && len(doc.Title) < 150 {
+        score += 10
+    }
+    if len(doc.MetaDescription) > 50 {
+        score += 5
+    }
+    
+    // Content signals
+    if len(doc.Entities) > 5 {
+        score += 10
+    }
+    if len(doc.Keywords) > 3 {
+        score += 10
+    }
+    
+    // Link signals
+    if len(doc.InternalLinks) > 0 {
+        score += 5
+    }
+    if len(doc.ExternalLinks) > 0 {
+        score += 5
+    }
+    
+    // Technical signals
+    if doc.IsSecure {
+        score += 30
+    }
+    if doc.LoadTime < 1000 {  // Less than 1 second
+        score += 15
+    }
+    
+    // Cap at 100
+    if score > 100 {
+        score = 100
+    }
+    
+    return score
 }
