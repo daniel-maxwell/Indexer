@@ -5,8 +5,12 @@ import (
     "net/url"
     "strings"
     "log"
+	"time"
+	"go.uber.org/zap"
+	"github.com/pemistahl/lingua-go"
 	// "github.com/microcosm-cc/bluemonday"
     // "golang.org/x/net/html"
+	"indexer/internal/pkg/logger"
 	"indexer/internal/pkg/deduplicator"
     "indexer/internal/pkg/models"
 	"indexer/internal/pkg/metrics"
@@ -31,6 +35,18 @@ func NewProcessor(deduper deduper.Deduper, nlpServiceURL string) Processor {
         deduper:  deduper,
         enricher: NewNLPEnricher(nlpServiceURL),
     }
+}
+
+// Global language detector singleton to avoid repeated initialization
+var languageDetector lingua.LanguageDetector
+
+// init initializes the language detector once
+func init() {
+	// Build the detector with preloaded models for better performance
+	languageDetector = lingua.NewLanguageDetectorBuilder().
+	FromAllLanguages().
+	WithPreloadedLanguageModels().
+	Build()
 }
 
 // Runs the data processing pipeline:
@@ -85,13 +101,22 @@ func cleanAndNormalize(pageData *models.PageData, doc *models.Document) error {
 	pageData.ExternalLinks = normalizeURLs(pageData.ExternalLinks)
 
 	// Language detection.
-	lang, err := detectLanguage(pageData.VisibleText)
-	if err != nil {
-		log.Printf("language detection failed: %v", err)
-	}
-	if lang != "en" {
-		return errors.New("not an English page, skipping")
-	}
+	// Language detection with timing
+    start := time.Now()
+    lang, err := detectLanguage(pageData.VisibleText)
+    metrics.LanguageDetectionLatency.Observe(time.Since(start).Seconds())
+    
+    if err != nil {
+        if strings.Contains(err.Error(), "not an English page") {
+            logger.Log.Info("Skipping non-English page", 
+                zap.String("url", pageData.URL), 
+                zap.String("detected_language", lang))
+            return errors.New("not an English page, skipping")
+        }
+        logger.Log.Warn("Language detection failed", zap.Error(err))
+        // Continue processing even if language detection fails
+    }
+
 	pageData.Language = lang
 
 	// Spam filtering.
@@ -104,8 +129,7 @@ func cleanAndNormalize(pageData *models.PageData, doc *models.Document) error {
 
 // Removes extra whitespace and newlines.
 func basicHTMLCleanup(input string) string {
-	cleaned := strings.TrimSpace(input)
-	return strings.Join(strings.Fields(cleaned), " ")
+	return strings.Join(strings.Fields(strings.TrimSpace(input)), " ")
 }
 
 // Trims, parses, and normalizes a URL.
@@ -136,10 +160,43 @@ func normalizeURLs(urls []string) []string {
 
 // Placeholder. Returns "en" if the text is long enough.
 func detectLanguage(text string) (string, error) {
-	if len(text) < 10 {
-		return "", errors.New("text too short for language detection")
+    const minTextLength = 20
+    if len(text) < minTextLength {
+        return "unknown", nil
+    }
+
+    // Detect language and calculate confidence values
+    detectedLang, exists := languageDetector.DetectLanguageOf(text)
+    if !exists {
+        metrics.LanguageDetectionFailures.Inc()
+        return "", errors.New("language detection failed")
+    }
+
+    // Get confidence values for all languages
+    confidenceValues := languageDetector.ComputeLanguageConfidenceValues(text)
+    var englishConfidence float64
+
+    // Find English confidence value
+    for _, conf := range confidenceValues {
+        if conf.Language() == lingua.English {
+            englishConfidence = conf.Value()
+            break
+        }
+    }
+
+    logger.Log.Debug("Language detection result", 
+        zap.String("detected_language", detectedLang.String()),
+        zap.Float64("english_confidence", englishConfidence))
+
+	if detectedLang == lingua.English {
+		return "en", nil
+	} else if englishConfidence > 0.33 {
+		return detectedLang.IsoCode639_1().String(), nil
 	}
-	return "en", nil
+
+    // If not English or low confidence, skip this document
+    metrics.NonEnglishPagesSkipped.Inc()
+    return detectedLang.IsoCode639_1().String(), errors.New("not an English page, skipping")
 }
 
 // Placeholder. Implements a naive spam check.

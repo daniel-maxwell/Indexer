@@ -73,6 +73,7 @@ func (enricher *nlpEnricher) Enrich(pageData *models.PageData, doc *models.Docum
     doc.CanonicalURL = pageData.CanonicalURL
     doc.Title = pageData.Title
     doc.MetaDescription = pageData.MetaDescription
+    doc.Language = pageData.Language
     doc.VisibleText = pageData.VisibleText
     doc.InternalLinks = pageData.InternalLinks
     doc.ExternalLinks = pageData.ExternalLinks
@@ -109,7 +110,7 @@ func (enricher *nlpEnricher) calculateQualityScore(doc *models.Document) int {
     }
     
     // Content signals
-    if len(doc.Entities) > 5 {
+    if len(doc.Entities) >= 1 {
         score += 10
     }
     if len(doc.Keywords) > 3 {
@@ -123,13 +124,22 @@ func (enricher *nlpEnricher) calculateQualityScore(doc *models.Document) int {
     if len(doc.ExternalLinks) > 0 {
         score += 5
     }
+
+    if doc.Language == "en" {
+        score += 10
+    }
     
     // Technical signals
     if doc.IsSecure {
-        score += 30
+        score += 25
     }
+    
     if doc.LoadTime < 1000 {  // Less than 1 second
-        score += 15
+        score += 10
+    } else if doc.LoadTime < 2000 {  // Less than 2 seconds
+        score += 5
+    } else if doc.LoadTime < 3000 {
+        score += 2
     }
     
     // Cap at 100

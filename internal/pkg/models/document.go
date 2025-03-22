@@ -21,6 +21,7 @@ type Document struct {
 	VisibleText      string         `json:"visible_text"`
 	Entities         []string       `json:"entities"`
 	Keywords         []string       `json:"keywords"`
+	Language         string         `json:"language"`
 	InternalLinks    []string       `json:"internal_links"`
 	ExternalLinks    []string       `json:"external_links"`
 	StructuredData   StructuredData `json:"structured_data"`

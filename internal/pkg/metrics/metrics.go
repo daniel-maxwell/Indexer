@@ -35,6 +35,28 @@ var BulkFailures = promauto.NewCounter(prometheus.CounterOpts{
     Help: "Total number of bulk requests that failed",
 })
 
+// Language detection metrics
+var (
+    // NonEnglishPagesSkipped counts skipped non-English pages
+    NonEnglishPagesSkipped = promauto.NewCounter(prometheus.CounterOpts{
+        Name: "indexer_non_english_pages_skipped_total",
+        Help: "Total number of pages skipped because they were not in English",
+    })
+
+    // LanguageDetectionFailures counts language detection failures
+    LanguageDetectionFailures = promauto.NewCounter(prometheus.CounterOpts{
+        Name: "indexer_language_detection_failures_total",
+        Help: "Total number of language detection failures",
+    })
+
+    // LanguageDetectionLatency measures time taken for language detection
+    LanguageDetectionLatency = promauto.NewHistogram(prometheus.HistogramOpts{
+        Name: "indexer_language_detection_latency_seconds",
+        Help: "Time taken to detect language",
+        Buckets: prometheus.DefBuckets,
+    })
+)
+
 // NLP service metrics
 var (
     NlpRequests = promauto.NewCounter(prometheus.CounterOpts{
