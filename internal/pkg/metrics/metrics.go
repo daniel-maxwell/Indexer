@@ -57,6 +57,26 @@ var (
     })
 )
 
+// Spam detection metrics
+var (
+    HighSpamPagesSkipped = promauto.NewCounter(prometheus.CounterOpts{
+        Name: "indexer_high_spam_pages_skipped_total",
+        Help: "Total number of pages skipped due to high spam score",
+    })
+    
+    SpamScoreHistogram = promauto.NewHistogram(prometheus.HistogramOpts{
+        Name: "indexer_spam_score_distribution",
+        Help: "Distribution of spam scores for processed pages",
+        Buckets: []float64{0, 1, 2, 5, 10, 15, 20, 30, 50, 100},
+    })
+    
+    SpamDetectionLatency = promauto.NewHistogram(prometheus.HistogramOpts{
+        Name: "indexer_spam_detection_latency_seconds",
+        Help: "Time taken to perform spam detection",
+        Buckets: prometheus.DefBuckets,
+    })
+)
+
 // NLP service metrics
 var (
     NlpRequests = promauto.NewCounter(prometheus.CounterOpts{

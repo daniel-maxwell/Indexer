@@ -34,6 +34,7 @@ type Document struct {
 	LoadTime         int64          `json:"load_time"`
 	IsSecure         bool           `json:"is_secure"`
 	QualityScore     int        	`json:"quality_score"` // Out of 100
+	SpamScore        int        	`json:"spam_score"`    // Out of 100
 	InboundLinkCount int            `json:"inbound_link_count"`
 	LastCrawled      time.Time      `json:"last_crawled"`
 }

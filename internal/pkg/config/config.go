@@ -23,6 +23,9 @@ type Config struct {
     RedisPassword string `mapstructure:"REDIS_PASSWORD"`
     RedisDB       int    `mapstructure:"REDIS_DB"`
 
+    // Processor config
+    SpamBlockThreshold int `mapstructure:"SPAM_BLOCK_THRESHOLD"`
+
     // NLP service config
     NlpServiceURL     string `mapstructure:"NLP_SERVICE_URL"`
     NlpBatchSize      int    `mapstructure:"NLP_BATCH_SIZE"`
@@ -48,6 +51,9 @@ func LoadConfig() (*Config, error) {
     viper.SetDefault("REDIS_PASSWORD", "")
     viper.SetDefault("REDIS_DB", 0)
     viper.SetDefault("LOG_LEVEL", "info")
+
+    // Processor defaults
+    viper.SetDefault("SPAM_BLOCK_THRESHOLD", 15)
 
     // NLP service defaults
     viper.SetDefault("NLP_SERVICE_URL", "http://localhost:5000/nlp")
