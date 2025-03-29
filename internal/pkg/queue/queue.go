@@ -7,9 +7,10 @@ import (
 )
 
 type Queue struct {
-    mu       sync.Mutex
-    capacity int
     q        []models.PageData
+    capacity int
+    closed   bool
+    mu       sync.Mutex
 }
 
 // First in, first out queue 
@@ -24,8 +25,9 @@ func CreateQueue(capacity int) (*Queue, error) {
         return nil, errors.New("capacity should be greater than 0")
     }
     return &Queue{
-        capacity: capacity,
         q:        make([]models.PageData, 0, capacity),
+        capacity: capacity,
+        closed:   false,
     }, nil
 }
 
@@ -33,6 +35,9 @@ func CreateQueue(capacity int) (*Queue, error) {
 func (q *Queue) Insert(item models.PageData) error {
     q.mu.Lock()
     defer q.mu.Unlock()
+    if q.closed {
+        return errors.New("queue is closed")
+    }
     if len(q.q) < int(q.capacity) {
         q.q = append(q.q, item)
         return nil
@@ -60,4 +65,11 @@ func (q *Queue) Length() int {
 // Returns true if the queue is empty
 func (q *Queue) IsEmpty() bool {
     return len(q.q) == 0
+}
+
+// Closes the queue, preventing further insertions
+func (q *Queue) Close() {
+    q.mu.Lock()
+    defer q.mu.Unlock()
+    q.closed = true
 }

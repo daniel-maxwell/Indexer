@@ -17,6 +17,13 @@ func startIngestHTTP(admin *administrator, port string) {
     http.HandleFunc("/index", func(writer http.ResponseWriter, request *http.Request) {
         var pageData models.PageData
 
+        contentType := request.Header.Get("Content-Type")
+        if contentType != "application/gob" && contentType != "application/octet-stream" {
+            http.Error(writer, "expected Content-Type: application/gob", http.StatusUnsupportedMediaType)
+            logger.Log.Warn("Unsupported Content-Type", zap.String("content_type", contentType))
+            return
+        }
+
         if err := gob.NewDecoder(request.Body).Decode(&pageData); err != nil {
             http.Error(writer, "failed to decode request", http.StatusBadRequest)
             logger.Log.Warn("Failed to decode incoming GOB", zap.Error(err))

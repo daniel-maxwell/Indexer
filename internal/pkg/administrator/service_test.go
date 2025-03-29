@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
-
 	"indexer/internal/pkg/models"
 )
 

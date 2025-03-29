@@ -15,7 +15,7 @@ import (
     "indexer/internal/pkg/metrics"
 )
 
-// BulkIndexer buffers documents until threshold or flush interval is reached.
+// Buffers documents until threshold or flush interval is reached.
 type BulkIndexer struct {
     mutex         sync.Mutex
     buffer        []*models.Document
@@ -25,15 +25,15 @@ type BulkIndexer struct {
     elasticURL    string
     indexName     string
 
-    // New fields
     flushInterval time.Duration
     maxRetries    int
+    wg            sync.WaitGroup
 
-    // for stopping the flush goroutine
-    done chan struct{}
+    
+    done chan struct{} // for stopping the flush goroutine
 }
 
-// NewBulkIndexer creates a new BulkIndexer.
+// Creates a new BulkIndexer.
 func NewBulkIndexer(threshold int, elasticURL, indexName string, flushIntervalSeconds, maxRetries int) *BulkIndexer {
     indexer := &BulkIndexer{
         buffer:         make([]*models.Document, 0, threshold),
@@ -49,7 +49,7 @@ func NewBulkIndexer(threshold int, elasticURL, indexName string, flushIntervalSe
     return indexer
 }
 
-// startFlushing runs in a goroutine and triggers flush on signal or interval
+// Runs in a goroutine and triggers flush on signal or interval
 func (indexer *BulkIndexer) startFlushing() {
     ticker := time.NewTicker(indexer.flushInterval)
     defer ticker.Stop()
@@ -69,7 +69,7 @@ func (indexer *BulkIndexer) startFlushing() {
     }
 }
 
-// AddDocumentToIndexerPayload adds a doc to the buffer and signals flush if threshold is met.
+// Adds a doc to the buffer and signals flush if threshold is met.
 func (indexer *BulkIndexer) AddDocumentToIndexerPayload(doc *models.Document) {
     indexer.mutex.Lock()
     indexer.buffer = append(indexer.buffer, doc)
@@ -86,7 +86,7 @@ func (indexer *BulkIndexer) AddDocumentToIndexerPayload(doc *models.Document) {
     }
 }
 
-// flush builds NDJSON payload and sends it to Elasticsearch.
+// Builds NDJSON payload and sends it to Elasticsearch.
 func (indexer *BulkIndexer) flush() {
     indexer.mutex.Lock()
     if len(indexer.buffer) == 0 {
@@ -128,15 +128,20 @@ func (indexer *BulkIndexer) flush() {
     }
 
     logger.Log.Info("Flushing documents to Elasticsearch", zap.Int("count", len(docsToIndex)))
-    go indexer.sendBulkRequest(ndjsonPayload.Bytes(), 0) // start with attempt #0
+    indexer.wg.Add(1)
+    go func() {
+        defer indexer.wg.Done()
+        indexer.sendBulkRequest(ndjsonPayload.Bytes(), 0)
+    }()
 }
 
-// Stop gracefully stops the BulkIndexer (e.g., called during shutdown).
+// Gracefully stops the BulkIndexer (e.g., called during shutdown).
 func (indexer *BulkIndexer) Stop() {
     close(indexer.done)
+    indexer.wg.Wait() // Wait for in-flight requests to finish
 }
 
-// sendBulkRequest tries to POST the NDJSON to Elasticsearch, with optional retries.
+// Tries to POST the NDJSON to Elasticsearch, with optional retries.
 func (indexer *BulkIndexer) sendBulkRequest(payload []byte, attempt int) {
     request, err := http.NewRequestWithContext(context.Background(), "POST", indexer.elasticURL, bytes.NewReader(payload))
     if err != nil {
@@ -173,7 +178,7 @@ func (indexer *BulkIndexer) sendBulkRequest(payload []byte, attempt int) {
     }
 }
 
-// backoffDuration returns a simple exponential backoff time.
+// Returns a simple exponential backoff time.
 func backoffDuration(attempt int) time.Duration {
     base := time.Second
     // Exponential backoff, plus a little jitter
@@ -191,15 +196,34 @@ func generateDocID(urlStr, canonicalStr string) string {
     return sanitizeID(urlStr)
 }
 
-// A simple placeholder that removes certain characters. 
-// Might refactor this to hash the URL or create a slug.
+// Sanitize the ID to remove problematic characters and ensure it's URL-safe.
 func sanitizeID(raw string) string {
+    // Remove protocols
     clean := strings.ReplaceAll(raw, "http://", "")
     clean = strings.ReplaceAll(clean, "https://", "")
+    
+    // Replace problematic characters
     clean = strings.ReplaceAll(clean, "/", "_")
-    // Keep it short
-    if len(clean) > 100 {
-        clean = clean[:100]
+    clean = strings.ReplaceAll(clean, "?", "_")
+    clean = strings.ReplaceAll(clean, "&", "_")
+    clean = strings.ReplaceAll(clean, "=", "_")
+    clean = strings.ReplaceAll(clean, "#", "_")
+    clean = strings.ReplaceAll(clean, " ", "_")
+    clean = strings.ReplaceAll(clean, ":", "_")
+    
+    // Remove any remaining invalid characters
+    var result strings.Builder
+    for _, r := range clean {
+        if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '.' || r == '-' {
+            result.WriteRune(r)
+        }
     }
-    return clean
+    
+    // Keep it short
+    resultStr := result.String()
+    if len(resultStr) > 100 {
+        resultStr = resultStr[:100]
+    }
+    
+    return resultStr
 }

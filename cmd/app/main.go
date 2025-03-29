@@ -57,14 +57,12 @@ func main() {
     logger.Log.Info("Received shutdown signal", zap.String("signal", s.String()))
     cancel() // stop reading from queue
 
-    // Give any in-flight processing a moment
-    time.Sleep(1 * time.Second)
+    // Create a context with a timeout for shutdown
+    _, shutdownCancel := context.WithTimeout(context.Background(), 30 * time.Second)
+    defer shutdownCancel()
 
-    // Gracefully stop the BulkIndexer
+    // Gracefully stop the workers and BulkIndexer
     admin.Stop()
 
-    // Additional short sleep to let final flush complete.
-    time.Sleep(1 * time.Second)
-
-    logger.Log.Info("Indexer shutdown complete")
+    logger.Log.Info("Shutdown complete")
 }

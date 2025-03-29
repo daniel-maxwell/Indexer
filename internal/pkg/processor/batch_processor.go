@@ -118,7 +118,17 @@ func (bp *BatchProcessor) Process(ctx context.Context, text string) ([]entity, [
             return nil, nil, result.err
         }
         return result.entities, result.keyphrases, nil
-    case <-ctx.Done():
+    case <-ctx.Done(): // Remove the item from batch when context is canceled
+        bp.mu.Lock()
+        for i, batchItem := range bp.currentBatch {
+            if batchItem.resultCh == resultCh {
+                lastIdx := len(bp.currentBatch) - 1
+                bp.currentBatch[i] = bp.currentBatch[lastIdx]
+                bp.currentBatch = bp.currentBatch[:lastIdx]
+                break
+            }
+        }
+        bp.mu.Unlock()
         return nil, nil, ctx.Err()
     }
 }
@@ -216,7 +226,7 @@ func (bp *BatchProcessor) processBatch() {
         start := time.Now()
         
         // Create request with increased timeout for batch
-        req, err := http.NewRequest("POST", bp.nlpServiceURL+"/batch", bytes.NewBuffer(jsonData))
+        req, err := http.NewRequest("POST", bp.nlpServiceURL+"batch", bytes.NewBuffer(jsonData))
         if err != nil {
             return err
         }

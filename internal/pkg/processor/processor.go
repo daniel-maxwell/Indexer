@@ -16,10 +16,6 @@ import (
 	"indexer/internal/pkg/metrics"
 )
 
-const (
-    SpamBlockThreshold = 15 // Block content with a score >= 15
-)
-
 // Defines the high-level interface for processing page data.
 type Processor interface {
 	// Process runs the complete data processing pipeline.
@@ -35,18 +31,18 @@ type processor struct {
 }
 
 // Creates a new Processor instance and wires in the sub‑components.
-func NewProcessor(deduper deduper.Deduper, nlpServiceURL string) Processor {
+func NewProcessor(deduper deduper.Deduper, nlpServiceURL string, spamThreshold int) Processor {
     return &processor{
         deduper:  deduper,
         enricher: NewNLPEnricher(nlpServiceURL),
-		spamDetector: spamdetector.NewSpamDetector(SpamBlockThreshold),
+		spamDetector: spamdetector.NewSpamDetector(spamThreshold),
     }
 }
 
 // Global language detector singleton to avoid repeated initialization
 var languageDetector lingua.LanguageDetector
 
-// init initializes the language detector once
+// Initializes the language detector once
 func init() {
 	// Build the detector with preloaded models for better performance
 	languageDetector = lingua.NewLanguageDetectorBuilder().
@@ -69,6 +65,9 @@ func (processor *processor) Process(pageData *models.PageData, doc *models.Docum
 	if processor.deduper.IsDuplicate(signature) {
 		return errors.New("duplicate page detected")
 	}
+
+	// Store signature
+	processor.deduper.StoreSignature(signature)
 
 	// Language detection
 	if err := detectLanguage(pageData); err != nil {
@@ -97,9 +96,6 @@ func (processor *processor) Process(pageData *models.PageData, doc *models.Docum
 			doc.QualityScore = 0
 		}
 	}
-
-    // Store signature
-    processor.deduper.StoreSignature(signature)
 
 	// Increment metrics
 	metrics.PagesProcessed.Inc()
@@ -140,17 +136,34 @@ func basicHTMLCleanup(input string) string {
 
 // Trims, parses, and normalizes a URL.
 func normalizeURL(rawURL string) (string, error) {
-	rawURL = strings.TrimSpace(rawURL)
-	if rawURL == "" {
-		return "", errors.New("empty URL")
-	}
-	parsedURL, err := url.Parse(rawURL)
-	if err != nil {
-		return "", err
-	}
-	parsedURL.Scheme = strings.ToLower(parsedURL.Scheme)
-	parsedURL.Host = strings.ToLower(parsedURL.Host)
-	return parsedURL.String(), nil
+    rawURL = strings.TrimSpace(rawURL)
+    if rawURL == "" {
+        return "", errors.New("empty URL")
+    }
+    
+    // Handle relative URLs
+    if !strings.Contains(rawURL, "://") && !strings.HasPrefix(rawURL, "//") {
+        return "", errors.New("relative URL without base")
+    }
+    
+    // Handle scheme-relative URLs (starting with //)
+    if strings.HasPrefix(rawURL, "//") {
+        rawURL = "https:" + rawURL
+    }
+    
+    parsedURL, err := url.Parse(rawURL)
+    if err != nil {
+        return "", err
+    }
+    
+    // Ensure scheme is set
+    if parsedURL.Scheme == "" {
+        parsedURL.Scheme = "https"
+    }
+    
+    parsedURL.Scheme = strings.ToLower(parsedURL.Scheme)
+    parsedURL.Host = strings.ToLower(parsedURL.Host)
+    return parsedURL.String(), nil
 }
 
 // Processes a slice of URLs and returns only those that are valid.
@@ -172,18 +185,19 @@ func detectLanguage(pageData *models.PageData) error {
 
     metrics.LanguageDetectionLatency.Observe(time.Since(start).Seconds())
     
-    if err != nil {
-        if strings.Contains(err.Error(), "not an English page") {
-            logger.Log.Info("Skipping non-English page", 
-                zap.String("url", pageData.URL), 
-                zap.String("detected_language", lang))
-            return errors.New("not an English page, skipping")
-        }
-        logger.Log.Warn("Language detection failed", zap.Error(err))
-        // Continue processing even if language detection fails
-    }
-
-	pageData.Language = lang
+	if err != nil {
+		if strings.Contains(err.Error(), "not an English page") {
+			logger.Log.Info("Skipping non-English page", 
+				zap.String("url", pageData.URL), 
+				zap.String("detected_language", lang))
+			return errors.New("not an English page, skipping")
+		}
+		logger.Log.Warn("Language detection failed", zap.Error(err))
+		metrics.LanguageDetectionFailures.Inc()
+		pageData.Language = "unknown"
+	} else {
+		pageData.Language = lang
+	}
 
 	return nil
 }

@@ -56,7 +56,7 @@ func New(config *config.Config) Administrator {
         config.MaxRetries,
     )
 
-    proc := processor.NewProcessor(deduper, config.NlpServiceURL)
+    proc := processor.NewProcessor(deduper, config.NlpServiceURL, config.SpamBlockThreshold)
     
     // Get number of workers from config
     numWorkers := config.NumWorkers
@@ -96,11 +96,20 @@ func (admin *administrator) StartService(port string) {
 
 // Stops the BulkIndexer and worker pool gracefully
 func (admin *administrator) Stop() {
-    // Wait for workers to finish
+    logger.Log.Info("Beginning shutdown sequence")
+    
+    // First flush and stop accepting new items in the queue
+    admin.queue.Close() // Assuming queue has a Close method to stop accepting new items
+    
+    logger.Log.Info("Waiting for worker pool to finish processing existing items")
+    // Wait for workers to finish current work
     admin.workerPool.Wait()
     
-    // Then stop the BulkIndexer
+    logger.Log.Info("Worker pool shutdown complete, stopping bulk indexer")
+    // Then stop the BulkIndexer and wait for pending requests
     admin.indexer.Stop()
+    
+    logger.Log.Info("Administrator stopped gracefully")
 }
 
 // Returns the current queue depth for health checks
